@@ -1,359 +1,397 @@
 """
-Main application entry point for Ultron AI
-Orchestrates all modules and starts the application
+N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems
+Main entry point for the AI assistant
+
+Usage:
+    python main.py --mode text          # Text-only mode
+    python main.py --mode voice         # Voice-enabled mode
+    python main.py --mode interactive   # Interactive mode (text + voice)
+    python main.py --no-voice          # Disable voice output
 """
 
 import sys
+import argparse
 import os
-import threading
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config.config import *
-from core.ai_engine import AIEngine
-from core.nlp_processor import NLPProcessor
-from core.memory import Memory
-from voice.text_to_speech import TextToSpeech
-from voice.speech_recognition import SpeechRecognizer
-from connectivity.api_handler import APIHandler
-from gui.hologram import AdvancedHologramDisplay
+# Import core components
+try:
+    from core.ai_engine import AIEngine
+    from core.nlp_processor import NLPProcessor
+    from core.memory import Memory
+    from voice.text_to_speech import TextToSpeech
+    from voice.speech_recognition_module import SpeechRecognitionModule
+    from gui.ui_controller import UIController
+    from connectivity.api_handler import APIHandler
+    from utils.logger import UltronLogger
+    from utils.helpers import clean_text, is_valid_email, get_current_time
+except ImportError as e:
+    print(f"❌ Error importing modules: {e}")
+    print("Make sure all dependencies are installed: pip install -r requirements.txt")
+    sys.exit(1)
 
 
-class UltronAI:
-    """Main Ultron AI Application"""
+class NEMESIS:
+    """
+    N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems
+    Main application controller
+    """
     
-    def __init__(self):
-        print("=" * 50)
-        print("ULTRON AI - Initializing...")
-        print("=" * 50)
+    def __init__(self, mode: str = "interactive", enable_voice: bool = True):
+        """Initialize N.E.M.E.S.I.S."""
+        self.mode = mode
+        self.enable_voice = enable_voice
+        self.running = False
         
-        # Initialize core modules
-        self.ai_engine = AIEngine(self)
+        # Initialize logger
+        self.logger = UltronLogger(level="INFO" if mode != "debug" else "DEBUG")
+        self.logger.info("=" * 50)
+        self.logger.info("N.E.M.E.S.I.S. - Initializing...")
+        self.logger.info("=" * 50)
+        
+        # Initialize components
+        self.memory = Memory()
+        self.ai_engine = AIEngine()
         self.nlp_processor = NLPProcessor()
-        self.memory = Memory(MEMORY_FILE)
-        self.tts = TextToSpeech(self)
-        self.speech_recognizer = SpeechRecognizer(self)
-        self.api_handler = APIHandler(self)
+        self.api_handler = APIHandler()
         
-        # Initialize GUI
-        self.hologram_display = None
+        # Initialize voice components if enabled
+        if self.enable_voice:
+            self.tts = TextToSpeech()
+            self.stt = SpeechRecognitionModule()
+        else:
+            self.tts = None
+            self.stt = None
+        
+        # Initialize UI if mode is not CLI
         self.ui_controller = None
+        if mode in ["interactive", "text"]:
+            self.ui_controller = UIController(self)
         
-        print("[CORE] AI Engine initialized")
-        print("[NLP] Natural Language Processor initialized")
-        print("[MEMORY] Memory system initialized")
-        print("[VOICE] Text-to-Speech and Speech Recognition initialized")
-        print("[CONNECTIVITY] API Handler initialized")
-        print("[HOLOGRAM] Holographic display ready")
-        print("\n" + "=" * 50)
-        print("ULTRON AI - Ready for operation")
-        print("=" * 50 + "\n")
+        self.logger.info("[CORE] AI Engine initialized")
+        self.logger.info("[NLP] Natural Language Processor initialized")
+        self.logger.info("[MEMORY] Memory system initialized")
         
-        # Welcome message
-        self.welcome_user()
+        if self.enable_voice:
+            self.logger.info("[VOICE] Text-to-Speech initialized")
+            self.logger.info("[VOICE] Speech Recognition initialized")
+        
+        self.logger.info("[CONNECTIVITY] API Handler initialized")
+        
+        self.logger.info("=" * 50)
+        self.logger.info("N.E.M.E.S.I.S. - Ready for operation")
+        self.logger.info("=" * 50)
     
-    def welcome_user(self):
-        """Greet the user on startup"""
-        welcome_msg = "Greetings. I am Ultron, your personal AI assistant. Ready to assist."
-        print(f"[ULTRON]: {welcome_msg}\n")
-        
-        if ENABLE_VOICE_OUTPUT:
-            self.tts.speak_async(welcome_msg)
-    
-    def process_user_input(self, user_input: str):
+    def process_user_input(self, user_input: str) -> tuple:
         """
         Process user input and generate response
         
         Args:
-            user_input: User's text input
+            user_input: User's text or voice input
+            
+        Returns:
+            Tuple of (response_text, metadata)
         """
-        if not user_input.strip():
-            return None
-        
-        print(f"[USER]: {user_input}")
-        
-        # Track in memory
-        self.memory.track_query(user_input)
-        
-        # Process through AI engine
-        response, metadata = self.ai_engine.process_query(user_input)
-        
-        # Update hologram based on response intensity
-        if self.hologram_display:
-            intensity = metadata.get("confidence", 0.7)
-            self.hologram_display.update_response(response, intensity)
-        
-        # Speak response if voice output enabled
-        if ENABLE_VOICE_OUTPUT:
-            self.tts.speak_async(response)
-        
-        print(f"[ULTRON]: {response}\n")
-        
-        return response, metadata
-    
-    def listen_for_voice(self):
-        """Listen for voice input"""
-        if not ENABLE_VOICE_INPUT:
-            return None
-        
-        print("[LISTENING...]")
-        
-        # Show listening state on hologram
-        if self.hologram_display:
-            self.hologram_display.update_response("Listening...", 0.5)
-        
-        # Listen for speech
-        recognized_text = self.speech_recognizer.listen()
-        
-        if recognized_text:
-            print(f"[RECOGNIZED]: {recognized_text}")
-            return recognized_text
-        else:
-            print("[UNRECOGNIZED]: Could not understand")
-            return None
-    
-    def voice_mode(self):
-        """Continuous voice interaction mode"""
-        print("\n[VOICE MODE] - Say 'exit' to stop\n")
-        
-        while True:
-            # Listen for voice input
-            user_input = self.listen_for_voice()
+        try:
+            # Clean input
+            user_input = clean_text(user_input)
             
-            if not user_input:
-                continue
+            # Track query in memory
+            self.memory.track_query(user_input)
             
-            # Check for exit command
-            if user_input.lower() in ["exit", "quit", "stop", "goodbye"]:
-                goodbye_msg = "Goodbye. Thank you for using Ultron."
-                print(f"[ULTRON]: {goodbye_msg}\n")
-                
-                if ENABLE_VOICE_OUTPUT:
-                    self.tts.speak(goodbye_msg)
-                break
+            # Process through NLP
+            processed_input = self.nlp_processor.process(user_input)
             
-            # Process input
-            self.process_user_input(user_input)
-    
-    def text_mode(self):
-        """Continuous text interaction mode"""
-        print("\n[TEXT MODE] - Type 'help' for commands, 'exit' to quit\n")
+            # Generate AI response
+            response = self.ai_engine.generate_response(processed_input)
+            
+            # Learn from response
+            self.memory.learn_response(user_input, response)
+            
+            # Return response and metadata
+            metadata = {
+                "timestamp": get_current_time(),
+                "mode": self.mode,
+                "input_length": len(user_input),
+                "response_length": len(response)
+            }
+            
+            return response, metadata
         
-        while True:
+        except Exception as e:
+            self.logger.error(f"Error processing input: {e}")
+            return f"Error: {str(e)}", {"error": True}
+    
+    def listen_for_voice(self) -> str:
+        """
+        Listen for voice input
+        
+        Returns:
+            Recognized text or empty string if recognition failed
+        """
+        if not self.enable_voice or not self.stt:
+            self.logger.warning("Voice input not enabled")
+            return ""
+        
+        try:
+            self.logger.info("[VOICE] Listening for voice input...")
+            recognized_text = self.stt.listen()
+            
+            if recognized_text:
+                self.logger.info(f"[VOICE] Recognized: {recognized_text}")
+                return recognized_text
+            else:
+                self.logger.warning("[VOICE] No speech detected")
+                return ""
+        
+        except Exception as e:
+            self.logger.error(f"Voice recognition error: {e}")
+            return ""
+    
+    def speak(self, text: str):
+        """
+        Speak text using text-to-speech
+        
+        Args:
+            text: Text to speak
+        """
+        if not self.enable_voice or not self.tts:
+            return
+        
+        try:
+            self.logger.info(f"[VOICE] Speaking: {text[:50]}...")
+            self.tts.speak(text)
+        except Exception as e:
+            self.logger.error(f"Text-to-speech error: {e}")
+    
+    def run_text_mode(self):
+        """Run in text-only mode"""
+        self.logger.info("[MODE] Starting Text Mode")
+        print("\n" + "=" * 50)
+        print("N.E.M.E.S.I.S. - Text Mode")
+        print("=" * 50)
+        print("Type your commands below (type 'exit' to quit)")
+        print("=" * 50 + "\n")
+        
+        self.running = True
+        while self.running:
             try:
+                # Get user input
                 user_input = input("You: ").strip()
                 
                 if not user_input:
                     continue
                 
-                # Handle special commands
-                if user_input.lower() == "exit":
-                    goodbye_msg = "Goodbye. Thank you for using Ultron."
-                    print(f"[ULTRON]: {goodbye_msg}\n")
-                    
-                    if ENABLE_VOICE_OUTPUT:
-                        self.tts.speak(goodbye_msg)
+                # Check for exit command
+                if user_input.lower() in ["exit", "quit", "bye", "goodbye"]:
+                    self.logger.info("User requested exit")
+                    self.shutdown()
                     break
                 
-                elif user_input.lower() == "help":
+                # Check for special commands
+                if user_input.lower() == "help":
                     self.show_help()
                     continue
                 
-                elif user_input.lower() == "voice":
-                    self.voice_mode()
-                    continue
-                
-                elif user_input.lower() == "memory":
+                if user_input.lower() == "memory":
                     stats = self.memory.get_memory_stats()
-                    print(f"[MEMORY STATS]: {stats}\n")
+                    print(f"\nMemory Statistics: {stats}\n")
                     continue
                 
-                elif user_input.lower() == "status":
-                    self.show_status()
-                    continue
-                
-                # Process normal input
-                response, metadata = self.process_user_input(user_input)
-                
-            except KeyboardInterrupt:
-                print("\n\n[SYSTEM]: Interrupted by user")
-                break
-            except Exception as e:
-                print(f"[ERROR]: {str(e)}\n")
-    
-    def interactive_mode(self):
-        """Interactive mode with both text and voice"""
-        print("\n[INTERACTIVE MODE] - 'voice' for voice, 'text' for text, 'exit' to quit\n")
-        
-        while True:
-            try:
-                user_input = input("You: ").strip()
-                
-                if not user_input:
-                    continue
-                
-                if user_input.lower() == "exit":
-                    goodbye_msg = "Goodbye. Thank you for using Ultron."
-                    print(f"[ULTRON]: {goodbye_msg}\n")
-                    break
-                
-                elif user_input.lower() == "voice":
-                    print("[SWITCHING TO VOICE MODE]")
-                    self.voice_mode()
-                    print("[BACK TO INTERACTIVE MODE]\n")
-                    continue
-                
-                elif user_input.lower() == "help":
-                    self.show_help()
-                    continue
-                
-                elif user_input.lower() == "status":
+                if user_input.lower() == "status":
                     self.show_status()
                     continue
                 
                 # Process input
                 response, metadata = self.process_user_input(user_input)
+                print(f"\nN.E.M.E.S.I.S.: {response}\n")
                 
+                # Speak if voice is enabled
+                if self.enable_voice:
+                    self.speak(response)
+            
             except KeyboardInterrupt:
-                print("\n\n[SYSTEM]: Interrupted by user")
+                print("\n\nShutting down...")
+                self.shutdown()
                 break
+            except Exception as e:
+                self.logger.error(f"Error in text mode: {e}")
+                print(f"Error: {e}\n")
+    
+    def run_voice_mode(self):
+        """Run in voice-only mode"""
+        if not self.enable_voice:
+            self.logger.error("Voice mode requires voice to be enabled")
+            self.run_text_mode()
+            return
+        
+        self.logger.info("[MODE] Starting Voice Mode")
+        print("\n" + "=" * 50)
+        print("N.E.M.E.S.I.S. - Voice Mode")
+        print("=" * 50)
+        print("Listening for voice input... (say 'exit' to quit)")
+        print("=" * 50 + "\n")
+        
+        self.running = True
+        while self.running:
+            try:
+                # Listen for voice
+                user_input = self.listen_for_voice()
+                
+                if not user_input:
+                    continue
+                
+                # Check for exit command
+                if user_input.lower() in ["exit", "quit", "stop", "goodbye"]:
+                    self.logger.info("User requested exit via voice")
+                    self.speak("Shutting down. Goodbye!")
+                    self.shutdown()
+                    break
+                
+                # Process input
+                response, metadata = self.process_user_input(user_input)
+                print(f"N.E.M.E.S.I.S.: {response}\n")
+                
+                # Speak response
+                self.speak(response)
+            
+            except KeyboardInterrupt:
+                print("\n\nShutting down...")
+                self.shutdown()
+                break
+            except Exception as e:
+                self.logger.error(f"Error in voice mode: {e}")
+    
+    def run_interactive_mode(self):
+        """Run in interactive mode with GUI"""
+        self.logger.info("[MODE] Starting Interactive Mode")
+        
+        if self.ui_controller:
+            self.ui_controller.run()
+        else:
+            self.logger.error("UI Controller not initialized")
+            self.run_text_mode()
     
     def show_help(self):
-        """Show help message"""
+        """Show help menu"""
         help_text = """
-╔════════════════════════════════════════════════════════════╗
-║                    ULTRON AI - HELP MENU                   ║
-╚════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════╗
+║  N.E.M.E.S.I.S. - Help Menu                 ║
+╚══════════════════════════════════════════════╝
 
 COMMANDS:
-  voice       - Switch to voice interaction mode
-  text        - Switch to text interaction mode
-  memory      - Show memory statistics
-  status      - Show Ultron status
-  help        - Show this help message
-  exit        - Exit Ultron
+  help     - Show this help menu
+  memory   - Display memory statistics
+  status   - Show system status
+  exit     - Exit N.E.M.E.S.I.S.
 
 FEATURES:
-  • Natural language understanding
-  • Voice input/output (if configured)
-  • Internet connectivity (weather, news, info)
-  • Conversation memory and learning
-  • Dynamic holographic visualization
+  ✓ Natural language understanding
+  ✓ Voice input/output (if enabled)
+  ✓ Conversation memory
+  ✓ API connectivity
+  ✓ Real-time responses
 
 TIPS:
-  • Say "exit" to quit voice mode
-  • Use "tell me about..." for information
-  • Ask "what's the weather" for weather
-  • Use complete sentences for best results
+  • Type complete sentences for best results
+  • Use voice mode for hands-free interaction
+  • Memory is automatically saved
 
-═══════════════════════════════════════════════════════════════
-        """
+For more information, visit:
+https://github.com/aadithya666/Ultron_AI
+
+"""
         print(help_text)
     
     def show_status(self):
-        """Show current status"""
+        """Show system status"""
+        stats = self.memory.get_memory_stats()
+        
         status_text = f"""
-╔════════════════════════════════════════════════════════════╗
-║                   ULTRON AI - STATUS REPORT                ║
-╚════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════╗
+║  N.E.M.E.S.I.S. - System Status             ║
+╚══════════════════════════════════════════════╝
 
-SYSTEM STATUS:
-  • Voice Input:      {'✓ Enabled' if ENABLE_VOICE_INPUT else '✗ Disabled'}
-  • Voice Output:     {'✓ Enabled' if ENABLE_VOICE_OUTPUT else '✗ Disabled'}
-  • Internet:         {'✓ Online' if self.api_handler.is_online() else '✗ Offline'}
-  • Hologram:         {'✓ Active' if self.hologram_display else '○ Idle'}
+Mode:                    {self.mode}
+Voice Enabled:           {self.enable_voice}
+Running:                 {self.running}
 
-AI ENGINE:
-  • Mood:             {self.ai_engine.get_mood()}
-  • Conversations:    {len(self.ai_engine.conversation_history)}
-  • Learning Mode:    {'✓ Enabled' if self.ai_engine.personality['learning_capacity'] else '✗ Disabled'}
+Memory Statistics:
+  Total Interactions:    {stats['total_interactions']}
+  Total Sessions:        {stats['total_sessions']}
+  User Preferences:      {stats['total_preferences']}
+  Learned Responses:     {stats['learned_responses']}
+  Session Events:        {stats['session_events']}
 
-MEMORY SYSTEM:
-  • User Preferences: {self.memory.get_memory_stats()['total_preferences']}
-  • Learned Responses:{self.memory.get_memory_stats()['learned_responses']}
-  • Session Events:   {self.memory.get_memory_stats()['session_events']}
+Time:                    {get_current_time()}
 
-═══════════════════════════════════════════════════════════════
-        """
+"""
         print(status_text)
     
-    def run(self, mode: str = "text"):
-        """
-        Run Ultron in specified mode
-        
-        Args:
-            mode: 'text', 'voice', or 'interactive'
-        """
-        try:
-            if mode == "text":
-                self.text_mode()
-            elif mode == "voice":
-                self.voice_mode()
-            elif mode == "interactive":
-                self.interactive_mode()
-            else:
-                print(f"Unknown mode: {mode}. Using text mode.")
-                self.text_mode()
-        
-        except Exception as e:
-            print(f"\n[CRITICAL ERROR]: {str(e)}")
-        
-        finally:
-            self.shutdown()
-    
     def shutdown(self):
-        """Clean shutdown"""
-        print("\n[SYSTEM]: Shutting down Ultron...")
+        """Shutdown N.E.M.E.S.I.S. gracefully"""
+        self.logger.info("N.E.M.E.S.I.S. shutting down...")
         
-        # Stop hologram
-        if self.hologram_display:
-            self.hologram_display.close()
+        # End session
+        self.memory.end_session()
         
-        # Stop speech
-        if self.tts:
-            self.tts.stop_speaking()
+        # Close connections
+        if self.api_handler:
+            try:
+                self.api_handler.close()
+            except:
+                pass
         
-        print("[SYSTEM]: Ultron offline")
-        print("=" * 50)
+        self.running = False
+        self.logger.info("Shutdown complete")
+        print("\n✓ N.E.M.E.S.I.S. has been shut down successfully\n")
 
 
 def main():
     """Main entry point"""
-    import argparse
+    parser = argparse.ArgumentParser(
+        description="N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems"
+    )
     
-    parser = argparse.ArgumentParser(description='Ultron AI Assistant')
     parser.add_argument(
-        '--mode',
-        choices=['text', 'voice', 'interactive'],
-        default='text',
-        help='Interaction mode (default: text)'
+        "--mode",
+        choices=["text", "voice", "interactive"],
+        default="interactive",
+        help="Operation mode (default: interactive)"
     )
+    
     parser.add_argument(
-        '--no-voice',
-        action='store_true',
-        help='Disable voice output'
+        "--no-voice",
+        action="store_true",
+        help="Disable voice input/output"
     )
+    
     parser.add_argument(
-        '--voice-only',
-        action='store_true',
-        help='Enable voice input/output only'
+        "--debug",
+        action="store_true",
+        help="Enable debug mode"
     )
     
     args = parser.parse_args()
     
-    # Override config based on arguments
-    if args.no_voice:
-        globals()['ENABLE_VOICE_OUTPUT'] = False
+    # Create and run N.E.M.E.S.I.S.
+    nemesis = NEMESIS(mode=args.mode, enable_voice=not args.no_voice)
     
-    if args.voice_only:
-        globals()['ENABLE_VOICE_INPUT'] = True
-        globals()['ENABLE_VOICE_OUTPUT'] = True
+    try:
+        if args.mode == "text":
+            nemesis.run_text_mode()
+        elif args.mode == "voice":
+            nemesis.run_voice_mode()
+        else:  # interactive
+            nemesis.run_interactive_mode()
     
-    # Create and run Ultron
-    ultron = UltronAI()
-    ultron.run(mode=args.mode)
+    except Exception as e:
+        nemesis.logger.critical(f"Critical error: {e}")
+        print(f"\n❌ Critical Error: {e}\n")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
