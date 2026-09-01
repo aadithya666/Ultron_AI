@@ -1,149 +1,306 @@
 """
-Natural Language Processing module for Ultron
-Handles text analysis and understanding
+N.E.M.E.S.I.S. NLP Processor
+Natural Language Processing and text analysis
 """
 
-import re
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.pos_tag import pos_tag
+from textblob import TextBlob
 from typing import List, Dict, Tuple
+from config.config import NLP_LANGUAGE, DEBUG_MODE
+
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
+
+try:
+    nltk.data.find('taggers/averaged_perceptron_tagger')
+except LookupError:
+    nltk.download('averaged_perceptron_tagger')
+
 
 class NLPProcessor:
-    """Natural Language Processing for user input"""
+    """Natural Language Processing module"""
     
     def __init__(self):
-        self.stop_words = self.load_stop_words()
-        self.context = {}
+        """Initialize NLP Processor"""
+        self.language = NLP_LANGUAGE
+        self.stop_words = set(stopwords.words(self.language))
         
-    def load_stop_words(self) -> List[str]:
-        """Load common English stop words"""
-        return [
-            "the", "is", "at", "which", "on", "a", "an", "and", "or", "but",
-            "in", "with", "by", "for", "of", "to", "from", "as", "be", "have",
-            "has", "had", "do", "does", "did", "will", "would", "should", "could"
-        ]
+        if DEBUG_MODE:
+            print("[DEBUG] NLP Processor initialized")
+    
+    def process(self, text: str) -> str:
+        """
+        Main NLP processing pipeline
+        
+        Args:
+            text: Raw text input
+            
+        Returns:
+            Processed text
+        """
+        # Clean text
+        text = self.clean_text(text)
+        
+        # Tokenize
+        tokens = self.tokenize(text)
+        
+        # Remove stopwords
+        tokens = [t for t in tokens if t.lower() not in self.stop_words]
+        
+        # Join back
+        processed_text = ' '.join(tokens)
+        
+        if DEBUG_MODE:
+            print(f"[DEBUG] Processed text: {processed_text}")
+        
+        return processed_text
+    
+    def clean_text(self, text: str) -> str:
+        """
+        Clean text by removing special characters
+        
+        Args:
+            text: Raw text
+            
+        Returns:
+            Cleaned text
+        """
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        return text
     
     def tokenize(self, text: str) -> List[str]:
-        """Tokenize text into words"""
-        # Convert to lowercase and split by whitespace and punctuation
-        words = re.findall(r'\b\w+\b', text.lower())
-        return words
-    
-    def remove_stop_words(self, tokens: List[str]) -> List[str]:
-        """Remove stop words from tokens"""
-        return [token for token in tokens if token not in self.stop_words]
-    
-    def extract_keywords(self, text: str) -> List[str]:
-        """Extract important keywords from text"""
-        tokens = self.tokenize(text)
-        keywords = self.remove_stop_words(tokens)
-        return keywords
-    
-    def sentiment_analysis(self, text: str) -> Dict:
-        """Analyze sentiment of text"""
-        positive_words = ["good", "great", "excellent", "happy", "love", "best", "amazing"]
-        negative_words = ["bad", "terrible", "hate", "angry", "worst", "awful", "sad"]
+        """
+        Tokenize text into words
         
-        text_lower = text.lower()
+        Args:
+            text: Text to tokenize
+            
+        Returns:
+            List of tokens
+        """
+        tokens = word_tokenize(text)
+        return tokens
+    
+    def extract_sentences(self, text: str) -> List[str]:
+        """
+        Extract sentences from text
         
-        positive_count = sum(1 for word in positive_words if word in text_lower)
-        negative_count = sum(1 for word in negative_words if word in text_lower)
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            List of sentences
+        """
+        sentences = sent_tokenize(text)
+        return sentences
+    
+    def analyze_sentiment(self, text: str) -> Dict:
+        """
+        Analyze sentiment of text
         
-        if positive_count > negative_count:
-            sentiment = "positive"
-            score = min(positive_count / (positive_count + negative_count + 1), 1.0)
-        elif negative_count > positive_count:
-            sentiment = "negative"
-            score = min(negative_count / (positive_count + negative_count + 1), 1.0)
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Dictionary with sentiment analysis
+        """
+        blob = TextBlob(text)
+        polarity = blob.sentiment.polarity  # -1 to 1
+        subjectivity = blob.sentiment.subjectivity  # 0 to 1
+        
+        # Determine sentiment label
+        if polarity > 0.1:
+            sentiment_label = "positive"
+        elif polarity < -0.1:
+            sentiment_label = "negative"
         else:
-            sentiment = "neutral"
-            score = 0.5
+            sentiment_label = "neutral"
         
         return {
-            "sentiment": sentiment,
-            "score": score,
-            "positive_words": positive_count,
-            "negative_words": negative_count
+            "sentiment": sentiment_label,
+            "polarity": round(polarity, 3),
+            "subjectivity": round(subjectivity, 3)
         }
     
     def extract_entities(self, text: str) -> Dict[str, List[str]]:
-        """Extract named entities from text"""
+        """
+        Extract named entities from text
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Dictionary of entity types and values
+        """
+        tokens = word_tokenize(text)
+        pos_tags = pos_tag(tokens)
+        
+        # Simple entity extraction by POS tags
         entities = {
-            "people": [],
-            "locations": [],
-            "organizations": [],
-            "dates": [],
-            "numbers": []
+            "nouns": [],
+            "verbs": [],
+            "adjectives": []
         }
         
-        # Simple regex-based entity extraction
-        # Dates
-        date_pattern = r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b'
-        entities["dates"] = re.findall(date_pattern, text)
-        
-        # Numbers
-        number_pattern = r'\b\d+(?:\.\d+)?\b'
-        entities["numbers"] = re.findall(number_pattern, text)
+        for word, tag in pos_tags:
+            if tag.startswith('NN'):
+                entities["nouns"].append(word)
+            elif tag.startswith('VB'):
+                entities["verbs"].append(word)
+            elif tag.startswith('JJ'):
+                entities["adjectives"].append(word)
         
         return entities
     
-    def similarity_score(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two texts"""
-        tokens1 = set(self.remove_stop_words(self.tokenize(text1)))
-        tokens2 = set(self.remove_stop_words(self.tokenize(text2)))
+    def extract_keywords(self, text: str, top_n: int = 5) -> List[str]:
+        """
+        Extract keywords from text
         
-        if not tokens1 or not tokens2:
-            return 0.0
+        Args:
+            text: Text to analyze
+            top_n: Number of keywords to extract
+            
+        Returns:
+            List of keywords
+        """
+        # Tokenize and filter
+        tokens = word_tokenize(text.lower())
+        keywords = [t for t in tokens if t.isalnum() and t not in self.stop_words]
         
-        intersection = tokens1.intersection(tokens2)
-        union = tokens1.union(tokens2)
+        # Count frequency
+        from collections import Counter
+        freq_dist = Counter(keywords)
         
-        return len(intersection) / len(union)
+        # Get top keywords
+        top_keywords = [kw for kw, _ in freq_dist.most_common(top_n)]
+        
+        return top_keywords
     
-    def find_similar_queries(self, query: str, previous_queries: List[str], threshold: float = 0.6) -> List[str]:
-        """Find similar queries from history"""
-        similar = []
-        for prev_query in previous_queries:
-            score = self.similarity_score(query, prev_query)
-            if score >= threshold:
-                similar.append(prev_query)
-        return similar
-    
-    def parse_command(self, text: str) -> Dict:
-        """Parse text as a command"""
-        tokens = self.tokenize(text)
+    def detect_language(self, text: str) -> str:
+        """
+        Detect language of text
         
-        command_info = {
-            "command": None,
-            "parameters": [],
-            "modifiers": []
-        }
-        
-        # Simple command parsing
-        if tokens:
-            command_info["command"] = tokens[0]
-            command_info["parameters"] = tokens[1:]
-        
-        return command_info
-    
-    def generate_response_template(self, intent: str) -> str:
-        """Generate response template based on intent"""
-        templates = {
-            "greeting": "Greetings, {user}. How may I assist you?",
-            "confirmation": "Understood. {action} has been {status}.",
-            "error": "I encountered an issue: {error}. Please try again.",
-            "information": "Based on my analysis: {info}",
-            "clarification": "Could you clarify: {question}?",
-            "action": "Executing {action}. Please stand by."
-        }
-        
-        return templates.get(intent, "I'm processing your request.")
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Language code
+        """
+        blob = TextBlob(text)
+        try:
+            language = blob.detect_language()
+            return language
+        except:
+            return "unknown"
     
     def correct_spelling(self, text: str) -> str:
-        """Basic spelling correction (can be enhanced)"""
-        # This is a simple placeholder - real implementation would use spell checker
-        return text
+        """
+        Correct spelling in text
+        
+        Args:
+            text: Text to correct
+            
+        Returns:
+            Corrected text
+        """
+        blob = TextBlob(text)
+        corrected = str(blob.correct())
+        return corrected
     
-    def language_detection(self, text: str) -> str:
-        """Detect language of text"""
-        # Simplified language detection
-        # In production, use libraries like langdetect or textblob
-        return "en"  # Default to English
+    def get_word_frequency(self, text: str) -> Dict[str, int]:
+        """
+        Get word frequency distribution
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Dictionary of word frequencies
+        """
+        tokens = word_tokenize(text.lower())
+        tokens = [t for t in tokens if t.isalnum()]
+        
+        from collections import Counter
+        freq_dist = Counter(tokens)
+        
+        return dict(freq_dist)
+    
+    def summarize(self, text: str, num_sentences: int = 3) -> str:
+        """
+        Summarize text (simple extractive summary)
+        
+        Args:
+            text: Text to summarize
+            num_sentences: Number of sentences in summary
+            
+        Returns:
+            Summary text
+        """
+        sentences = sent_tokenize(text)
+        
+        if len(sentences) <= num_sentences:
+            return text
+        
+        # Simple scoring based on word frequency
+        words = word_tokenize(text.lower())
+        freq = {}
+        for word in words:
+            freq[word] = freq.get(word, 0) + 1
+        
+        # Score sentences
+        sentence_scores = {}
+        for i, sentence in enumerate(sentences):
+            sentence_words = word_tokenize(sentence.lower())
+            score = sum(freq.get(word, 0) for word in sentence_words)
+            sentence_scores[i] = score
+        
+        # Get top sentences
+        top_sentences = sorted(sentence_scores, key=sentence_scores.get, reverse=True)[:num_sentences]
+        top_sentences.sort()
+        
+        # Build summary
+        summary = ' '.join(sentences[i] for i in top_sentences)
+        
+        return summary
+    
+    def analyze_readability(self, text: str) -> Dict:
+        """
+        Analyze text readability
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            Readability metrics
+        """
+        sentences = sent_tokenize(text)
+        words = word_tokenize(text)
+        
+        avg_words_per_sentence = len(words) / len(sentences) if sentences else 0
+        
+        # Simple readability score (0-100)
+        # Higher = more readable
+        readability_score = min(100, max(0, 206.835 - 1.015 * avg_words_per_sentence - 84.6 * (1 if avg_words_per_sentence > 15 else 0)))
+        
+        return {
+            "sentence_count": len(sentences),
+            "word_count": len(words),
+            "avg_words_per_sentence": round(avg_words_per_sentence, 2),
+            "readability_score": round(readability_score, 2)
+        }
