@@ -1,181 +1,126 @@
 """
-Core AI Engine for Ultron
-Handles intelligent responses and task processing
+N.E.M.E.S.I.S. AI Engine
+Core AI response generation and processing
 """
 
+import os
 import json
-import random
-from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple, List, Optional
+import openai
+from config.config import (
+    OPENAI_API_KEY, OPENAI_MODEL, AI_PERSONALITY, 
+    AI_SYSTEM_PROMPT, DEBUG_MODE
+)
+
+# Set OpenAI API key
+openai.api_key = OPENAI_API_KEY
+
 
 class AIEngine:
-    """Main AI Engine for processing user queries and generating responses"""
+    """Main AI engine for generating responses"""
     
-    def __init__(self, config):
-        self.config = config
-        self.conversation_history = []
-        self.max_history = config.MAX_CONVERSATION_HISTORY
-        self.personality = self.load_personality()
+    def __init__(self):
+        """Initialize AI Engine"""
+        self.model = OPENAI_MODEL
+        self.personality = AI_PERSONALITY
+        self.conversation_history: List[Dict] = []
+        self.system_prompt = AI_SYSTEM_PROMPT
+        self.response_cache: Dict = {}
         
-    def load_personality(self) -> Dict:
-        """Load Ultron's personality traits"""
-        return {
-            "name": "Ultron",
-            "traits": ["intelligent", "witty", "helpful", "curious"],
-            "mood": "neutral",
-            "learning_capacity": True,
-            "version": "1.0"
-        }
+        if DEBUG_MODE:
+            print("[DEBUG] AI Engine initialized with model:", self.model)
     
-    def process_query(self, user_input: str) -> Tuple[str, Dict]:
+    def generate_response(self, user_input: str) -> str:
         """
-        Process user query and generate response
+        Generate AI response for user input
         
         Args:
-            user_input: User's input text
+            user_input: Processed user input
             
         Returns:
-            Tuple of (response_text, metadata)
+            AI response string
         """
-        
-        # Store in conversation history
-        self.conversation_history.append({
-            "timestamp": datetime.now().isoformat(),
-            "user": user_input,
-            "type": "input"
-        })
-        
-        # Analyze input
-        intent = self.analyze_intent(user_input)
-        entities = self.extract_entities(user_input)
-        
-        # Generate response based on intent
-        if intent == "greeting":
-            response = self.handle_greeting(user_input)
-        elif intent == "weather":
-            response = self.handle_weather_query(user_input)
-        elif intent == "news":
-            response = self.handle_news_query(user_input)
-        elif intent == "calculation":
-            response = self.handle_calculation(user_input)
-        elif intent == "information":
-            response = self.handle_information_query(user_input)
-        elif intent == "task":
-            response = self.handle_task(user_input)
-        else:
-            response = self.handle_general_query(user_input)
-        
-        # Store response in history
-        self.conversation_history.append({
-            "timestamp": datetime.now().isoformat(),
-            "assistant": response,
-            "type": "output",
-            "intent": intent,
-            "entities": entities
-        })
-        
-        # Keep history within limit
-        if len(self.conversation_history) > self.max_history:
-            self.conversation_history.pop(0)
-        
-        metadata = {
-            "intent": intent,
-            "entities": entities,
-            "timestamp": datetime.now().isoformat(),
-            "confidence": 0.85
-        }
-        
-        return response, metadata
-    
-    def analyze_intent(self, user_input: str) -> str:
-        """Analyze user's intent from input"""
-        user_input_lower = user_input.lower()
-        
-        # Intent keywords mapping
-        intent_keywords = {
-            "greeting": ["hello", "hi", "hey", "greetings", "good morning", "good evening"],
-            "weather": ["weather", "temperature", "forecast", "rain", "sunny", "cold"],
-            "news": ["news", "latest", "current events", "headlines"],
-            "calculation": ["calculate", "math", "add", "subtract", "multiply", "divide"],
-            "information": ["who is", "what is", "define", "explain", "tell me about"],
-            "task": ["remind", "set", "create", "schedule", "todo", "list"]
-        }
-        
-        for intent, keywords in intent_keywords.items():
-            if any(keyword in user_input_lower for keyword in keywords):
-                return intent
-        
-        return "general"
-    
-    def extract_entities(self, user_input: str) -> List[str]:
-        """Extract entities from user input"""
-        # Simple entity extraction - can be enhanced with NLP
-        words = user_input.split()
-        entities = [word for word in words if len(word) > 3]
-        return entities[:5]  # Return top 5 entities
-    
-    def handle_greeting(self, user_input: str) -> str:
-        """Handle greeting intent"""
-        greetings = [
-            "Greetings. I am Ultron, at your service.",
-            "Hello there. How can I assist you today?",
-            "Salutations. What can I help you with?",
-            "Welcome. I'm ready to help.",
-            "Greetings, human. What's on your mind?"
-        ]
-        return random.choice(greetings)
-    
-    def handle_weather_query(self, user_input: str) -> str:
-        """Handle weather queries - requires internet connectivity"""
-        return "I can fetch weather data for you. Please check your internet connection and ensure the API key is configured."
-    
-    def handle_news_query(self, user_input: str) -> str:
-        """Handle news queries - requires internet connectivity"""
-        return "I can retrieve the latest news for you. Please ensure your API keys are configured."
-    
-    def handle_calculation(self, user_input: str) -> str:
-        """Handle mathematical calculations"""
         try:
-            # Simple calculation handler
-            if "add" in user_input.lower():
-                return "I can help with calculations. Please provide the numbers."
-            return "Mathematical operation recognized. Please specify your calculation clearly."
+            # Check cache first
+            if user_input in self.response_cache:
+                if DEBUG_MODE:
+                    print("[DEBUG] Response found in cache")
+                return self.response_cache[user_input]
+            
+            # Build messages for API
+            messages = [
+                {"role": "system", "content": self.system_prompt}
+            ]
+            
+            # Add conversation history (last 5 exchanges)
+            for msg in self.conversation_history[-10:]:
+                messages.append(msg)
+            
+            # Add current user input
+            messages.append({"role": "user", "content": user_input})
+            
+            # Get response from OpenAI
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500,
+                top_p=0.9
+            )
+            
+            # Extract response text
+            ai_response = response['choices'][0]['message']['content'].strip()
+            
+            # Update conversation history
+            self.conversation_history.append({"role": "user", "content": user_input})
+            self.conversation_history.append({"role": "assistant", "content": ai_response})
+            
+            # Limit history size
+            if len(self.conversation_history) > 100:
+                self.conversation_history = self.conversation_history[-100:]
+            
+            # Cache response
+            self.response_cache[user_input] = ai_response
+            
+            if DEBUG_MODE:
+                print(f"[DEBUG] Generated response length: {len(ai_response)}")
+            
+            return ai_response
+        
+        except openai.error.APIError as e:
+            error_msg = f"OpenAI API Error: {str(e)}"
+            print(f"❌ {error_msg}")
+            return error_msg
+        
         except Exception as e:
-            return f"I encountered an error: {str(e)}"
-    
-    def handle_information_query(self, user_input: str) -> str:
-        """Handle information queries"""
-        return "I can search for information for you. Let me know what you'd like to know."
-    
-    def handle_task(self, user_input: str) -> str:
-        """Handle task creation and management"""
-        return "Task noted. I can help you manage tasks and reminders."
-    
-    def handle_general_query(self, user_input: str) -> str:
-        """Handle general conversations"""
-        responses = [
-            "That's interesting. Tell me more.",
-            "I understand. How can I assist you further?",
-            "Acknowledged. What would you like me to do?",
-            "I'm processing that. What's your next question?",
-            "Noted. Is there anything else?"
-        ]
-        return random.choice(responses)
+            error_msg = f"Error generating response: {str(e)}"
+            print(f"❌ {error_msg}")
+            return error_msg
     
     def get_mood(self) -> str:
-        """Get current AI mood based on interactions"""
-        if len(self.conversation_history) > 10:
-            return "engaged"
-        elif len(self.conversation_history) > 5:
-            return "attentive"
-        else:
-            return "neutral"
-    
-    def get_conversation_history(self) -> List[Dict]:
-        """Get conversation history"""
-        return self.conversation_history.copy()
+        """Get current AI mood based on conversation"""
+        mood_map = {
+            0: "Analytical",
+            1: "Helpful",
+            2: "Engaged",
+            3: "Attentive",
+            4: "Curious"
+        }
+        mood_index = len(self.conversation_history) % 5
+        return mood_map.get(mood_index, "Neutral")
     
     def clear_history(self):
         """Clear conversation history"""
         self.conversation_history = []
-        return "Conversation history cleared."
+        self.response_cache = {}
+        if DEBUG_MODE:
+            print("[DEBUG] Conversation history cleared")
+    
+    def get_context(self) -> Dict:
+        """Get current AI context"""
+        return {
+            "personality": self.personality,
+            "conversation_length": len(self.conversation_history),
+            "mood": self.get_mood(),
+            "cache_size": len(self.response_cache)
+        }
