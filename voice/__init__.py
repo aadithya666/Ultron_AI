@@ -1,175 +1,197 @@
 """
-Memory module for Ultron
-Stores and retrieves conversation history and learned information
+N.E.M.E.S.I.S. NLP Processor
+Natural Language Processing and text analysis
 """
 
-import json
-import os
-from datetime import datetime
-from typing import Dict, List, Any
+import re
+from collections import Counter
+from typing import Dict, List
+
+import nltk
+from nltk.corpus import stopwords
+from nltk.pos_tag import pos_tag
+from nltk.tokenize import sent_tokenize, word_tokenize
+from textblob import TextBlob
+
+from config.config import DEBUG_MODE, NLP_LANGUAGE
 
 
-class Memory:
-    """Memory management for Ultron AI"""
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
 
-    def __init__(self, memory_file: str = "data/memory.json"):
-        self.memory_file = memory_file
-        self.memory = self.load_memory()
-        self.session_memory = []
-        self.learned_patterns = {}
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
-    def load_memory(self) -> Dict:
-        """Load memory from file"""
-        if os.path.exists(self.memory_file):
-            try:
-                with open(self.memory_file, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error loading memory: {e}")
-                return self.create_empty_memory()
-        return self.create_empty_memory()
+try:
+    nltk.data.find('taggers/averaged_perceptron_tagger')
+except LookupError:
+    nltk.download('averaged_perceptron_tagger')
 
-    def create_empty_memory(self) -> Dict:
-        """Create empty memory structure"""
-        return {
-            "user_preferences": {},
-            "learned_responses": {},
-            "frequent_queries": {},
-            "user_profile": {},
-            "important_dates": {},
-            "reminders": [],
-            "sessions": []
-        }
 
-    def save_memory(self):
-        """Save memory to file"""
-        try:
-            os.makedirs(os.path.dirname(self.memory_file), exist_ok=True)
-            with open(self.memory_file, 'w') as f:
-                json.dump(self.memory, f, indent=2)
-        except Exception as e:
-            print(f"Error saving memory: {e}")
+SLANG_MAP = {
+    "gonna": "going to",
+    "gotta": "got to",
+    "wanna": "want to",
+    "lemme": "let me",
+    "y'all": "you all",
+    "ya": "you",
+    "u": "you",
+    "r": "are",
+    "pls": "please",
+    "plz": "please",
+    "fr": "for real",
+    "bro": "brother",
+    "nah": "no",
+    "idk": "I do not know",
+    "imo": "in my opinion",
+    "smh": "shaking my head",
+    "wtf": "what the hell",
+    "omg": "oh my god",
+    "b4": "before",
+    "neva": "never",
+    "luv": "love",
+    "wanna": "want to",
+    "ain't": "is not",
+    "can't": "cannot",
+    "won't": "will not",
+}
 
-    def remember_preference(self, key: str, value: Any):
-        self.memory["user_preferences"][key] = {
-            "value": value,
-            "timestamp": datetime.now().isoformat()
-        }
-        self.save_memory()
 
-    def get_preference(self, key: str) -> Any:
-        if key in self.memory["user_preferences"]:
-            return self.memory["user_preferences"][key]["value"]
-        return None
+class NLPProcessor:
+    """Natural Language Processing module"""
 
-    def learn_response(self, query: str, response: str, effectiveness: float = 0.8):
-        self.memory["learned_responses"][query] = {
-            "response": response,
-            "effectiveness": effectiveness,
-            "times_used": 0,
-            "first_learned": datetime.now().isoformat()
-        }
-        self.save_memory()
+    def __init__(self):
+        self.language = NLP_LANGUAGE
+        self.stop_words = set(stopwords.words(self.language))
+        if DEBUG_MODE:
+            print("[DEBUG] NLP Processor initialized")
 
-    def get_learned_response(self, query: str) -> str:
-        if query in self.memory["learned_responses"]:
-            entry = self.memory["learned_responses"][query]
-            entry["times_used"] += 1
-            self.save_memory()
-            return entry["response"]
-        return None
+    def normalize_slang(self, text: str) -> str:
+        """Convert common slang and informal speech into clearer English."""
+        normalized = text.lower()
+        for slang, expanded in SLANG_MAP.items():
+            normalized = re.sub(rf"\b{re.escape(slang)}\b", expanded, normalized)
 
-    def track_query(self, query: str):
-        if query in self.memory["frequent_queries"]:
-            self.memory["frequent_queries"][query]["count"] += 1
+        normalized = normalized.replace("'", " ")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    def process(self, text: str) -> str:
+        """Main NLP processing pipeline."""
+        text = self.normalize_slang(text)
+        text = self.clean_text(text)
+        tokens = self.tokenize(text)
+        tokens = [t for t in tokens if t.lower() not in self.stop_words]
+        processed_text = ' '.join(tokens)
+
+        if DEBUG_MODE:
+            print(f"[DEBUG] Processed text: {processed_text}")
+
+        return processed_text
+
+    def clean_text(self, text: str) -> str:
+        """Clean text by removing special characters."""
+        text = text.lower()
+        text = ' '.join(text.split())
+        return text
+
+    def tokenize(self, text: str) -> List[str]:
+        return word_tokenize(text)
+
+    def extract_sentences(self, text: str) -> List[str]:
+        return sent_tokenize(text)
+
+    def analyze_sentiment(self, text: str) -> Dict:
+        blob = TextBlob(text)
+        polarity = blob.sentiment.polarity
+        subjectivity = blob.sentiment.subjectivity
+
+        if polarity > 0.1:
+            sentiment_label = "positive"
+        elif polarity < -0.1:
+            sentiment_label = "negative"
         else:
-            self.memory["frequent_queries"][query] = {
-                "count": 1,
-                "first_asked": datetime.now().isoformat()
-            }
-        self.save_memory()
+            sentiment_label = "neutral"
 
-    def get_frequent_queries(self, limit: int = 5) -> List[Dict]:
-        sorted_queries = sorted(
-            self.memory["frequent_queries"].items(),
-            key=lambda x: x[1]["count"],
-            reverse=True
-        )
-        return [
-            {"query": q, "count": data["count"]}
-            for q, data in sorted_queries[:limit]
-        ]
-
-    def set_user_profile(self, profile_data: Dict):
-        self.memory["user_profile"].update(profile_data)
-        self.save_memory()
-
-    def get_user_profile(self) -> Dict:
-        return self.memory["user_profile"]
-
-    def add_important_date(self, label: str, date: str):
-        self.memory["important_dates"][label] = {
-            "date": date,
-            "added": datetime.now().isoformat()
-        }
-        self.save_memory()
-
-    def set_reminder(self, reminder: str, due_date: str = None):
-        reminder_obj = {
-            "text": reminder,
-            "created": datetime.now().isoformat(),
-            "due": due_date,
-            "completed": False
-        }
-        self.memory["reminders"].append(reminder_obj)
-        self.save_memory()
-        return reminder_obj
-
-    def get_reminders(self, completed: bool = False) -> List[Dict]:
-        return [r for r in self.memory["reminders"] if r["completed"] == completed]
-
-    def complete_reminder(self, reminder_index: int):
-        if 0 <= reminder_index < len(self.memory["reminders"]):
-            self.memory["reminders"][reminder_index]["completed"] = True
-            self.save_memory()
-
-    def add_to_session_memory(self, event: Dict):
-        event["timestamp"] = datetime.now().isoformat()
-        self.session_memory.append(event)
-
-    def get_session_memory(self) -> List[Dict]:
-        return self.session_memory.copy()
-
-    def clear_session_memory(self):
-        self.session_memory = []
-
-    def learn_pattern(self, pattern: str, response: str):
-        self.learned_patterns[pattern] = response
-
-    def recognize_pattern(self, input_text: str) -> str:
-        for pattern, response in self.learned_patterns.items():
-            if pattern.lower() in input_text.lower():
-                return response
-        return None
-
-    def get_memory_stats(self) -> Dict:
         return {
-            "total_preferences": len(self.memory["user_preferences"]),
-            "learned_responses": len(self.memory["learned_responses"]),
-            "frequent_queries": len(self.memory["frequent_queries"]),
-            "total_reminders": len(self.memory["reminders"]),
-            "session_events": len(self.session_memory),
-            "total_interactions": sum(item["count"] for item in self.memory["frequent_queries"].values()),
-            "total_sessions": len(self.memory.get("sessions", [])),
+            "sentiment": sentiment_label,
+            "polarity": round(polarity, 3),
+            "subjectivity": round(subjectivity, 3),
         }
 
-    def start_session(self):
-        self.session_memory = []
+    def extract_entities(self, text: str) -> Dict[str, List[str]]:
+        tokens = word_tokenize(text)
+        pos_tags = pos_tag(tokens)
 
-    def end_session(self):
-        self.session_memory = []
-        self.memory.setdefault("sessions", []).append({
-            "ended_at": datetime.now().isoformat(),
-            "event_count": len(self.session_memory)
-        })
-        self.save_memory()
+        entities = {"nouns": [], "verbs": [], "adjectives": []}
+
+        for word, tag in pos_tags:
+            if tag.startswith('NN'):
+                entities["nouns"].append(word)
+            elif tag.startswith('VB'):
+                entities["verbs"].append(word)
+            elif tag.startswith('JJ'):
+                entities["adjectives"].append(word)
+
+        return entities
+
+    def extract_keywords(self, text: str, top_n: int = 5) -> List[str]:
+        tokens = word_tokenize(text.lower())
+        keywords = [t for t in tokens if t.isalnum() and t not in self.stop_words]
+        freq_dist = Counter(keywords)
+        return [kw for kw, _ in freq_dist.most_common(top_n)]
+
+    def detect_language(self, text: str) -> str:
+        blob = TextBlob(text)
+        try:
+            return blob.detect_language()
+        except Exception:
+            return "unknown"
+
+    def correct_spelling(self, text: str) -> str:
+        blob = TextBlob(text)
+        return str(blob.correct())
+
+    def get_word_frequency(self, text: str) -> Dict[str, int]:
+        tokens = word_tokenize(text.lower())
+        tokens = [t for t in tokens if t.isalnum()]
+        freq_dist = Counter(tokens)
+        return dict(freq_dist)
+
+    def summarize(self, text: str, num_sentences: int = 3) -> str:
+        sentences = sent_tokenize(text)
+        if len(sentences) <= num_sentences:
+            return text
+
+        words = word_tokenize(text.lower())
+        freq = {}
+        for word in words:
+            freq[word] = freq.get(word, 0) + 1
+
+        sentence_scores = {}
+        for i, sentence in enumerate(sentences):
+            sentence_words = word_tokenize(sentence.lower())
+            score = sum(freq.get(word, 0) for word in sentence_words)
+            sentence_scores[i] = score
+
+        top_sentences = sorted(sentence_scores, key=sentence_scores.get, reverse=True)[:num_sentences]
+        top_sentences.sort()
+        return ' '.join(sentences[i] for i in top_sentences)
+
+    def analyze_readability(self, text: str) -> Dict:
+        sentences = sent_tokenize(text)
+        words = word_tokenize(text)
+        avg_words_per_sentence = len(words) / len(sentences) if sentences else 0
+        readability_score = min(100, max(0, 206.835 - 1.015 * avg_words_per_sentence - 84.6 * (1 if avg_words_per_sentence > 15 else 0)))
+
+        return {
+            "sentence_count": len(sentences),
+            "word_count": len(words),
+            "avg_words_per_sentence": round(avg_words_per_sentence, 2),
+            "readability_score": round(readability_score, 2),
+        }
