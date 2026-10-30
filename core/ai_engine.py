@@ -1,126 +1,281 @@
-"""
-N.E.M.E.S.I.S. AI Engine
-Core AI response generation and processing
-"""
+import sys
+import argparse
+from pathlib import Path
 
-import os
-import json
-from typing import Dict, Tuple, List, Optional
-import openai
-from config.config import (
-    OPENAI_API_KEY, OPENAI_MODEL, AI_PERSONALITY, 
-    AI_SYSTEM_PROMPT, DEBUG_MODE
-)
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent))
 
-# Set OpenAI API key
-openai.api_key = OPENAI_API_KEY
+# Import core components
+try:
+    from config import config as app_config
+    from core.ai_engine import AIEngine
+    from core.nlp_processor import NLPProcessor
+    from core.memory import Memory
+    from voice.text_to_speech import TextToSpeech
+    from voice.speech_recognition_module import SpeechRecognitionModule
+    from gui.ui_controller import UIController
+    from connectivity.api_handler import APIHandler
+    from utils.logger import UltronLogger
+    from utils.helpers import clean_text, get_current_time
+except ImportError as e:
+    print(f"❌ Error importing modules: {e}")
+    print("Make sure all dependencies are installed: pip install -r requirements.txt")
+    sys.exit(1)
 
 
-class AIEngine:
-    """Main AI engine for generating responses"""
-    
-    def __init__(self):
-        """Initialize AI Engine"""
-        self.model = OPENAI_MODEL
-        self.personality = AI_PERSONALITY
-        self.conversation_history: List[Dict] = []
-        self.system_prompt = AI_SYSTEM_PROMPT
-        self.response_cache: Dict = {}
-        
-        if DEBUG_MODE:
-            print("[DEBUG] AI Engine initialized with model:", self.model)
-    
-    def generate_response(self, user_input: str) -> str:
-        """
-        Generate AI response for user input
-        
-        Args:
-            user_input: Processed user input
-            
-        Returns:
-            AI response string
-        """
+class NEMESIS:
+    """
+    N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems
+    Main application controller
+    """
+
+    def __init__(self, mode: str = "interactive", enable_voice: bool = True):
+        """Initialize N.E.M.E.S.I.S."""
+        self.mode = mode
+        self.enable_voice = enable_voice
+        self.running = False
+
+        self.logger = UltronLogger(level="INFO" if mode != "debug" else "DEBUG")
+        self.logger.info("=" * 50)
+        self.logger.info("N.E.M.E.S.I.S. - Initializing...")
+        self.logger.info("=" * 50)
+
+        self.memory = Memory()
+        self.ai_engine = AIEngine()
+        self.nlp_processor = NLPProcessor()
+        self.api_handler = APIHandler(app_config)
+
+        # Initialize voice components if enabled
+        if self.enable_voice:
+            self.tts = TextToSpeech(app_config)
+            self.stt = SpeechRecognitionModule(app_config)
+        else:
+            self.tts = None
+            self.stt = None
+
+        # Only create Tk UI in interactive mode; text mode must stay headless-safe
+        self.ui_controller = None
+        if mode == "interactive":
+            self.ui_controller = UIController(self)
+
+        self.logger.info("[CORE] AI Engine initialized")
+        self.logger.info("[NLP] Natural Language Processor initialized")
+        self.logger.info("[MEMORY] Memory system initialized")
+
+        if self.enable_voice:
+            self.logger.info("[VOICE] Text-to-Speech initialized")
+            self.logger.info("[VOICE] Speech Recognition initialized")
+
+        self.logger.info("[CONNECTIVITY] API Handler initialized")
+
+        self.logger.info("=" * 50)
+        self.logger.info("N.E.M.E.S.I.S. - Ready for operation")
+        self.logger.info("=" * 50)
+
+    def process_user_input(self, user_input: str) -> tuple:
+        user_input = clean_text(user_input)
+        self.memory.track_query(user_input)
+        processed_input = self.nlp_processor.process(user_input)
+        response = self.ai_engine.generate_response(processed_input)
+        self.memory.learn_response(user_input, response)
+        metadata = {
+            "timestamp": get_current_time(),
+            "mode": self.mode,
+            "input_length": len(user_input),
+            "response_length": len(response),
+        }
+        return response, metadata
+
+    def listen_for_voice(self) -> str:
+        if not self.enable_voice or not self.stt:
+            self.logger.warning("Voice input not enabled")
+            return ""
         try:
-            # Check cache first
-            if user_input in self.response_cache:
-                if DEBUG_MODE:
-                    print("[DEBUG] Response found in cache")
-                return self.response_cache[user_input]
-            
-            # Build messages for API
-            messages = [
-                {"role": "system", "content": self.system_prompt}
-            ]
-            
-            # Add conversation history (last 5 exchanges)
-            for msg in self.conversation_history[-10:]:
-                messages.append(msg)
-            
-            # Add current user input
-            messages.append({"role": "user", "content": user_input})
-            
-            # Get response from OpenAI
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=500,
-                top_p=0.9
-            )
-            
-            # Extract response text
-            ai_response = response['choices'][0]['message']['content'].strip()
-            
-            # Update conversation history
-            self.conversation_history.append({"role": "user", "content": user_input})
-            self.conversation_history.append({"role": "assistant", "content": ai_response})
-            
-            # Limit history size
-            if len(self.conversation_history) > 100:
-                self.conversation_history = self.conversation_history[-100:]
-            
-            # Cache response
-            self.response_cache[user_input] = ai_response
-            
-            if DEBUG_MODE:
-                print(f"[DEBUG] Generated response length: {len(ai_response)}")
-            
-            return ai_response
-        
-        except openai.error.APIError as e:
-            error_msg = f"OpenAI API Error: {str(e)}"
-            print(f"❌ {error_msg}")
-            return error_msg
-        
+            self.logger.info("[VOICE] Listening for voice input...")
+            recognized_text = self.stt.listen()
+            if recognized_text:
+                self.logger.info(f"[VOICE] Recognized: {recognized_text}")
+                return recognized_text
+            self.logger.warning("[VOICE] No speech detected")
+            return ""
         except Exception as e:
-            error_msg = f"Error generating response: {str(e)}"
-            print(f"❌ {error_msg}")
-            return error_msg
-    
-    def get_mood(self) -> str:
-        """Get current AI mood based on conversation"""
-        mood_map = {
-            0: "Analytical",
-            1: "Helpful",
-            2: "Engaged",
-            3: "Attentive",
-            4: "Curious"
-        }
-        mood_index = len(self.conversation_history) % 5
-        return mood_map.get(mood_index, "Neutral")
-    
-    def clear_history(self):
-        """Clear conversation history"""
-        self.conversation_history = []
-        self.response_cache = {}
-        if DEBUG_MODE:
-            print("[DEBUG] Conversation history cleared")
-    
-    def get_context(self) -> Dict:
-        """Get current AI context"""
-        return {
-            "personality": self.personality,
-            "conversation_length": len(self.conversation_history),
-            "mood": self.get_mood(),
-            "cache_size": len(self.response_cache)
-        }
+            self.logger.error(f"Voice recognition error: {e}")
+            return ""
+
+    def speak(self, text: str):
+        if not self.enable_voice or not self.tts:
+            return
+        try:
+            self.logger.info(f"[VOICE] Speaking: {text[:50]}...")
+            self.tts.speak(text)
+        except Exception as e:
+            self.logger.error(f"Text-to-speech error: {e}")
+
+    def run_text_mode(self):
+        self.logger.info("[MODE] Starting Text Mode")
+        print("\n" + "=" * 50)
+        print("N.E.M.E.S.I.S. - Text Mode")
+        print("=" * 50)
+        print("Type your commands below (type 'exit' to quit)")
+        print("=" * 50 + "\n")
+
+        self.running = True
+        while self.running:
+            try:
+                user_input = input("You: ").strip()
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ["exit", "quit", "bye", "goodbye"]:
+                    self.logger.info("User requested exit")
+                    self.shutdown()
+                    break
+
+                if user_input.lower() == "help":
+                    self.show_help(); continue
+                if user_input.lower() == "memory":
+                    stats = self.memory.get_memory_stats(); print(f"\nMemory Statistics: {stats}\n"); continue
+                if user_input.lower() == "status":
+                    self.show_status(); continue
+
+                response, _ = self.process_user_input(user_input)
+                print(f"\nN.E.M.E.S.I.S.: {response}\n")
+                if self.enable_voice:
+                    self.speak(response)
+            except KeyboardInterrupt:
+                print("\n\nShutting down...")
+                self.shutdown(); break
+            except Exception as e:
+                self.logger.error(f"Error in text mode: {e}")
+                print(f"Error: {e}\n")
+
+    def run_voice_mode(self):
+        if not self.enable_voice:
+            self.logger.error("Voice mode requires voice to be enabled")
+            self.run_text_mode(); return
+
+        self.logger.info("[MODE] Starting Voice Mode")
+        print("\n" + "=" * 50)
+        print("N.E.M.E.S.I.S. - Voice Mode")
+        print("=" * 50)
+        print("Listening for voice input... (say 'exit' to quit)")
+        print("=" * 50 + "\n")
+
+        self.running = True
+        while self.running:
+            try:
+                user_input = self.listen_for_voice()
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ["exit", "quit", "stop", "goodbye"]:
+                    self.logger.info("User requested exit via voice")
+                    self.speak("Shutting down. Goodbye!")
+                    self.shutdown(); break
+
+                response, _ = self.process_user_input(user_input)
+                print(f"N.E.M.E.S.I.S.: {response}\n")
+                self.speak(response)
+            except KeyboardInterrupt:
+                print("\n\nShutting down...")
+                self.shutdown(); break
+            except Exception as e:
+                self.logger.error(f"Error in voice mode: {e}")
+
+    def run_interactive_mode(self):
+        self.logger.info("[MODE] Starting Interactive Mode")
+        if self.ui_controller:
+            self.ui_controller.run()
+        else:
+            self.logger.error("UI Controller not initialized")
+            self.run_text_mode()
+
+    def show_help(self):
+        help_text = """
+ ╔══════════════════════════════════════════════╗
+ ║  N.E.M.E.S.I.S. - Help Menu                 ║
+ ╚══════════════════════════════════════════════╝
+
+ COMMANDS:
+   help     - Show this help menu
+   memory   - Display memory statistics
+   status   - Show system status
+   exit     - Exit N.E.M.E.S.I.S.
+
+ FEATURES:
+   ✓ Natural language understanding
+   ✓ Voice input/output (if enabled)
+   ✓ Conversation memory
+   ✓ API connectivity
+   ✓ Real-time responses
+
+ TIPS:
+   • Type complete sentences for best results
+   • Use voice mode for hands-free interaction
+   • Memory is automatically saved
+
+ For more information, visit:
+ https://github.com/aadithya666/Ultron_AI
+
+ """
+        print(help_text)
+
+    def show_status(self):
+        stats = self.memory.get_memory_stats()
+        status_text = f"""
+ ╔══════════════════════════════════════════════╗
+ ║  N.E.M.E.S.I.S. - System Status             ║
+ ╚══════════════════════════════════════════════╝
+
+ Mode:                    {self.mode}
+ Voice Enabled:           {self.enable_voice}
+ Running:                 {self.running}
+
+ Memory Statistics:
+   Total Interactions:    {stats['total_interactions']}
+   Total Sessions:        {stats['total_sessions']}
+   User Preferences:      {stats['total_preferences']}
+   Learned Responses:     {stats['learned_responses']}
+   Session Events:        {stats['session_events']}
+
+ Time:                    {get_current_time()}
+
+ """
+        print(status_text)
+
+    def shutdown(self):
+        self.logger.info("N.E.M.E.S.I.S. shutting down...")
+        self.memory.end_session()
+        if self.api_handler:
+            try:
+                self.api_handler.close()
+            except Exception:
+                pass
+        self.running = False
+        self.logger.info("Shutdown complete")
+        print("\n✓ N.E.M.E.S.I.S. has been shut down successfully\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems")
+    parser.add_argument("--mode", choices=["text", "voice", "interactive"], default="interactive", help="Operation mode (default: interactive)")
+    parser.add_argument("--no-voice", action="store_true", help="Disable voice input/output")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    args = parser.parse_args()
+
+    nemesis = NEMESIS(mode=args.mode, enable_voice=not args.no_voice)
+    try:
+        if args.mode == "text":
+            nemesis.run_text_mode()
+        elif args.mode == "voice":
+            nemesis.run_voice_mode()
+        else:
+            nemesis.run_interactive_mode()
+    except Exception as e:
+        nemesis.logger.critical(f"Critical error: {e}")
+        print(f"\n❌ Critical Error: {e}\n")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
