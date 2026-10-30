@@ -1,72 +1,158 @@
 """
-Speech Recognition module for Ultron
-Converts speech to text using various engines
+Text-to-Speech module for Ultron
+Converts text responses to speech with deep male voice
 """
 
-import speech_recognition as sr
-from typing import Tuple, Optional
+import pyttsx3
 import threading
+from typing import Optional
 
-class SpeechRecognizer:
-    """Handles speech-to-text conversion"""
-    
-    def __init__(self, config):
+
+class TextToSpeech:
+    """Handles text-to-speech conversion with deep male voice"""
+
+    def __init__(self, config=None):
         self.config = config
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
-        self.is_listening = False
-        self.recognized_text = ""
-        
-    def listen(self, timeout: int = None) -> Optional[str]:
+        self.engine = pyttsx3.init()
+        self.setup_engine()
+        self.is_speaking = False
+
+    def setup_engine(self):
+        """Configure TTS engine for deep male voice"""
+        self.engine.setProperty('rate', getattr(self.config, 'VOICE_RATE', 120) if self.config else 120)
+        self.engine.setProperty('volume', getattr(self.config, 'VOICE_VOLUME', 1.0) if self.config else 1.0)
+
+        voices = self.engine.getProperty('voices')
+
+        if voices:
+            male_voice_found = False
+
+            for voice in voices:
+                voice_name = voice.name.lower()
+                if any(keyword in voice_name for keyword in ['male', 'david', 'george', 'henry', 'michael']):
+                    self.engine.setProperty('voice', voice.id)
+                    male_voice_found = True
+                    print(f"[VOICE] Using voice: {voice.name}")
+                    break
+
+            if not male_voice_found and len(voices) > 1:
+                self.engine.setProperty('voice', voices[1].id)
+                print(f"[VOICE] Using voice: {voices[1].name}")
+            elif not male_voice_found:
+                self.engine.setProperty('voice', voices[0].id)
+                print(f"[VOICE] Using voice: {voices[0].name}")
+
+        try:
+            self.engine.setProperty('pitch', getattr(self.config, 'VOICE_PITCH', 0.6) if self.config else 0.6)
+        except Exception:
+            pass
+
+        print("[VOICE] Voice configured: Deep Male Bass")
+
+    def speak(self, text: str) -> bool:
         """
-        Listen to microphone input and convert to text
-        
+        Speak the given text
+
         Args:
-            timeout: Maximum time to listen in seconds
-            
+            text: Text to speak
+
         Returns:
-            Recognized text or None if not recognized
+            True if successful, False otherwise
         """
         try:
-            with self.microphone as source:
-                # Adjust for ambient noise
-                self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                
-                # Listen with timeout
-                timeout_val = timeout or self.config.SPEECH_RECOGNITION_TIMEOUT
-                audio = self.recognizer.listen(source, timeout=timeout_val)
-            
-            # Try to recognize speech
-            text = self.recognizer.recognize_google(audio)
-            self.recognized_text = text
-            return text
-            
-        except sr.UnknownValueError:
-            return None
-        except sr.RequestError as e:
-            print(f"Speech recognition error: {e}")
-            return None
+            if not text:
+                return False
+
+            self.is_speaking = True
+            self.engine.say(text)
+            self.engine.runAndWait()
+            self.is_speaking = False
+            return True
+
         except Exception as e:
-            print(f"Error during listening: {e}")
-            return None
-    
-    def listen_async(self, callback):
-        """Listen asynchronously and call callback when done"""
-        def listen_thread():
-            text = self.listen()
-            callback(text)
-        
-        thread = threading.Thread(target=listen_thread, daemon=True)
+            print(f"[ERROR] Text-to-speech error: {e}")
+            self.is_speaking = False
+            return False
+
+    def speak_async(self, text: str):
+        """Speak text asynchronously (non-blocking)"""
+        def speak_thread():
+            self.speak(text)
+
+        thread = threading.Thread(target=speak_thread, daemon=True)
         thread.start()
-    
-    def set_listening_state(self, state: bool):
-        """Set listening state"""
-        self.is_listening = state
-    
-    def is_currently_listening(self) -> bool:
-        """Check if currently listening"""
-        return self.is_listening
-    
-    def get_last_recognized_text(self) -> str:
-        """Get last recognized text"""
-        return self.recognized_text
+
+    def stop_speaking(self):
+        """Stop current speech"""
+        try:
+            self.engine.stop()
+            self.is_speaking = False
+        except Exception as e:
+            print(f"[ERROR] Error stopping speech: {e}")
+
+    def is_currently_speaking(self) -> bool:
+        """Check if currently speaking"""
+        return self.is_speaking
+
+    def set_rate(self, rate: int):
+        """
+        Set speech rate (words per minute)
+        Lower = deeper/slower, Higher = faster
+        """
+        self.engine.setProperty('rate', max(50, min(300, rate)))
+
+    def set_volume(self, volume: float):
+        """Set volume (0.0 to 1.0)"""
+        self.engine.setProperty('volume', max(0.0, min(1.0, volume)))
+
+    def set_pitch(self, pitch: float):
+        """
+        Set pitch (0.0 to 2.0)
+        Lower = deeper voice, Higher = higher pitched
+        """
+        try:
+            self.engine.setProperty('pitch', max(0.1, min(2.0, pitch)))
+        except Exception:
+            print("[WARNING] Pitch adjustment not supported by current TTS engine")
+
+    def get_available_voices(self) -> list:
+        """Get list of available voices with details"""
+        voices = self.engine.getProperty('voices')
+        voice_list = []
+
+        for i, v in enumerate(voices):
+            voice_list.append({
+                "id": v.id,
+                "name": v.name,
+                "gender": "Unknown",
+                "index": i
+            })
+
+        return voice_list
+
+    def list_voices(self):
+        """Print available voices"""
+        voices = self.get_available_voices()
+        print("\n[AVAILABLE VOICES]")
+        print("=" * 60)
+        for voice in voices:
+            print(f"  [{voice['index']}] {voice['name']} (ID: {voice['id']})")
+        print("=" * 60 + "\n")
+
+    def set_voice_by_index(self, index: int):
+        """Set voice by index from available voices"""
+        voices = self.engine.getProperty('voices')
+
+        if 0 <= index < len(voices):
+            self.engine.setProperty('voice', voices[index].id)
+            print(f"[VOICE] Voice changed to: {voices[index].name}")
+            return True
+        else:
+            print(f"[ERROR] Voice index {index} not found")
+            return False
+
+    def test_voice(self):
+        """Test current voice with sample text"""
+        test_message = "Greetings. I am Ultron. Testing voice configuration."
+        print(f"\n[TEST] Playing: '{test_message}'\n")
+        self.speak(test_message)
