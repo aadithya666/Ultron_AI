@@ -1,158 +1,120 @@
 """
-Text-to-Speech module for Ultron
-Converts text responses to speech with deep male voice
+API Handler for external integrations.
+Manages requests to external APIs.
 """
 
-import pyttsx3
-import threading
-from typing import Optional
+from datetime import datetime
+from types import SimpleNamespace
+from typing import Any, Dict, Optional
+
+import requests
 
 
-class TextToSpeech:
-    """Handles text-to-speech conversion with deep male voice"""
+class APIHandler:
+    """Handles external API calls."""
 
     def __init__(self, config=None):
-        self.config = config
-        self.engine = pyttsx3.init()
-        self.setup_engine()
-        self.is_speaking = False
+        self.config = config or SimpleNamespace(
+            DEFAULT_LOCATION="New York",
+            OPENWEATHER_API_KEY="",
+            NEWS_API_KEY="",
+            DEFAULT_COUNTRY_CODE="us",
+        )
+        self.session = requests.Session()
+        self.cache = {}
+        self.cache_duration = 3600
 
-    def setup_engine(self):
-        """Configure TTS engine for deep male voice"""
-        self.engine.setProperty('rate', getattr(self.config, 'VOICE_RATE', 120) if self.config else 120)
-        self.engine.setProperty('volume', getattr(self.config, 'VOICE_VOLUME', 1.0) if self.config else 1.0)
-
-        voices = self.engine.getProperty('voices')
-
-        if voices:
-            male_voice_found = False
-
-            for voice in voices:
-                voice_name = voice.name.lower()
-                if any(keyword in voice_name for keyword in ['male', 'david', 'george', 'henry', 'michael']):
-                    self.engine.setProperty('voice', voice.id)
-                    male_voice_found = True
-                    print(f"[VOICE] Using voice: {voice.name}")
-                    break
-
-            if not male_voice_found and len(voices) > 1:
-                self.engine.setProperty('voice', voices[1].id)
-                print(f"[VOICE] Using voice: {voices[1].name}")
-            elif not male_voice_found:
-                self.engine.setProperty('voice', voices[0].id)
-                print(f"[VOICE] Using voice: {voices[0].name}")
-
+    def fetch_weather(self, location: str = None, units: str = "metric") -> Optional[Dict]:
         try:
-            self.engine.setProperty('pitch', getattr(self.config, 'VOICE_PITCH', 0.6) if self.config else 0.6)
+            location = location or getattr(self.config, "DEFAULT_LOCATION", "New York")
+            api_key = getattr(self.config, "OPENWEATHER_API_KEY", "")
+            if not api_key or api_key == "your_api_key_here":
+                return {"error": "OpenWeather API key not configured"}
+
+            response = self.session.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"q": location, "appid": api_key, "units": units},
+                timeout=5,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"Weather API error: {e}")
+            return None
+
+    def fetch_news(self, query: str = None, country: str = None) -> Optional[Dict]:
+        try:
+            api_key = getattr(self.config, "NEWS_API_KEY", "")
+            if not api_key or api_key == "your_api_key_here":
+                return {"error": "NewsAPI key not configured"}
+
+            params = {"apiKey": api_key, "pageSize": 5}
+            if query:
+                params["q"] = query
+            params["country"] = country or getattr(self.config, "DEFAULT_COUNTRY_CODE", "us")
+
+            response = self.session.get(
+                "https://newsapi.org/v2/top-headlines",
+                params=params,
+                timeout=5,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"News API error: {e}")
+            return None
+
+    def search_wikipedia(self, query: str, auto_suggest: bool = True) -> Optional[Dict]:
+        try:
+            import wikipedia
+
+            result = wikipedia.summary(query, auto_suggest=auto_suggest, sentences=3)
+            return {"title": query, "summary": result, "source": "wikipedia"}
+        except Exception as e:
+            print(f"Wikipedia search error: {e}")
+            return None
+
+    def fetch_data(self, url: str, params: Dict = None, headers: Dict = None) -> Optional[Dict]:
+        try:
+            response = self.session.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"API fetch error: {e}")
+            return None
+
+    def post_data(self, url: str, data: Dict = None, headers: Dict = None) -> Optional[Dict]:
+        try:
+            response = self.session.post(url, json=data, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"API post error: {e}")
+            return None
+
+    def is_online(self) -> bool:
+        try:
+            response = self.session.get("https://www.google.com", timeout=2)
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def cache_get(self, key: str) -> Optional[Any]:
+        if key in self.cache:
+            data, timestamp = self.cache[key]
+            if datetime.now().timestamp() - timestamp < self.cache_duration:
+                return data
+            del self.cache[key]
+        return None
+
+    def cache_set(self, key: str, data: Any):
+        self.cache[key] = (data, datetime.now().timestamp())
+
+    def clear_cache(self):
+        self.cache.clear()
+
+    def close(self):
+        try:
+            self.session.close()
         except Exception:
             pass
-
-        print("[VOICE] Voice configured: Deep Male Bass")
-
-    def speak(self, text: str) -> bool:
-        """
-        Speak the given text
-
-        Args:
-            text: Text to speak
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            if not text:
-                return False
-
-            self.is_speaking = True
-            self.engine.say(text)
-            self.engine.runAndWait()
-            self.is_speaking = False
-            return True
-
-        except Exception as e:
-            print(f"[ERROR] Text-to-speech error: {e}")
-            self.is_speaking = False
-            return False
-
-    def speak_async(self, text: str):
-        """Speak text asynchronously (non-blocking)"""
-        def speak_thread():
-            self.speak(text)
-
-        thread = threading.Thread(target=speak_thread, daemon=True)
-        thread.start()
-
-    def stop_speaking(self):
-        """Stop current speech"""
-        try:
-            self.engine.stop()
-            self.is_speaking = False
-        except Exception as e:
-            print(f"[ERROR] Error stopping speech: {e}")
-
-    def is_currently_speaking(self) -> bool:
-        """Check if currently speaking"""
-        return self.is_speaking
-
-    def set_rate(self, rate: int):
-        """
-        Set speech rate (words per minute)
-        Lower = deeper/slower, Higher = faster
-        """
-        self.engine.setProperty('rate', max(50, min(300, rate)))
-
-    def set_volume(self, volume: float):
-        """Set volume (0.0 to 1.0)"""
-        self.engine.setProperty('volume', max(0.0, min(1.0, volume)))
-
-    def set_pitch(self, pitch: float):
-        """
-        Set pitch (0.0 to 2.0)
-        Lower = deeper voice, Higher = higher pitched
-        """
-        try:
-            self.engine.setProperty('pitch', max(0.1, min(2.0, pitch)))
-        except Exception:
-            print("[WARNING] Pitch adjustment not supported by current TTS engine")
-
-    def get_available_voices(self) -> list:
-        """Get list of available voices with details"""
-        voices = self.engine.getProperty('voices')
-        voice_list = []
-
-        for i, v in enumerate(voices):
-            voice_list.append({
-                "id": v.id,
-                "name": v.name,
-                "gender": "Unknown",
-                "index": i
-            })
-
-        return voice_list
-
-    def list_voices(self):
-        """Print available voices"""
-        voices = self.get_available_voices()
-        print("\n[AVAILABLE VOICES]")
-        print("=" * 60)
-        for voice in voices:
-            print(f"  [{voice['index']}] {voice['name']} (ID: {voice['id']})")
-        print("=" * 60 + "\n")
-
-    def set_voice_by_index(self, index: int):
-        """Set voice by index from available voices"""
-        voices = self.engine.getProperty('voices')
-
-        if 0 <= index < len(voices):
-            self.engine.setProperty('voice', voices[index].id)
-            print(f"[VOICE] Voice changed to: {voices[index].name}")
-            return True
-        else:
-            print(f"[ERROR] Voice index {index} not found")
-            return False
-
-    def test_voice(self):
-        """Test current voice with sample text"""
-        test_message = "Greetings. I am Ultron. Testing voice configuration."
-        print(f"\n[TEST] Playing: '{test_message}'\n")
-        self.speak(test_message)

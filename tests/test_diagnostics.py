@@ -1,0 +1,31 @@
+# Ultron AI - Dependencies
+
+# Core AI and NLP
+google-genai>=1.0.0
+nltk>=3.8
+textblob>=0.17.1
+
+# Speech Recognition
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+
+# GUI and Visualization
+tkinter
+
+# Web and API
+requests>=2.28.0
+aiohttp>=3.8.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=1.5.0
+
+# Utilities
+python-dotenv>=0.21.0
+python-dateutil>=2.8.2
+
+# Async
+asyncio
+
+# System
+psutil>=5.9.0

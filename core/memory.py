@@ -1,139 +1,130 @@
 """
-API Handler for external integrations
-Manages requests to external APIs
+N.E.M.E.S.I.S. AI Engine
+Core Gemini-based AI response generation.
 """
 
-import requests
-from typing import Dict, Any, Optional
-from datetime import datetime
-from types import SimpleNamespace
+import os
+from typing import Dict, List
+
+from config.config import AI_PERSONALITY, AI_SYSTEM_PROMPT, DEBUG_MODE, GEMINI_API_KEY, GEMINI_MODEL
+
+try:
+    from google import genai
+except ImportError:  # pragma: no cover
+    genai = None
 
 
-class APIHandler:
-    """Handles external API calls"""
+class AIEngine:
+    """Main AI engine for generating responses using Gemini."""
 
-    def __init__(self, config=None):
-        self.config = config or SimpleNamespace(
-            DEFAULT_LOCATION="New York",
-            OPENWEATHER_API_KEY="",
-            NEWS_API_KEY="",
-            DEFAULT_COUNTRY_CODE="us",
-        )
-        self.session = requests.Session()
-        self.cache = {}
-        self.cache_duration = 3600
+    def __init__(self):
+        self.model = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
+        self.personality = AI_PERSONALITY
+        self.conversation_history: List[Dict] = []
+        self.system_prompt = AI_SYSTEM_PROMPT
+        self.response_cache: Dict = {}
+        self.api_key = os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
 
-    def fetch_weather(self, location: str = None, units: str = "metric") -> Optional[Dict]:
+        self.client = None
+        if genai is not None and self.api_key:
+            self.client = genai.Client(api_key=self.api_key)
+
+        if DEBUG_MODE:
+            print("[DEBUG] AI Engine initialized with model:", self.model)
+
+    def _extract_text(self, response) -> str:
+        """Pull plain text from a Gemini response object."""
+        if response is None:
+            return ""
+
+        text = getattr(response, "text", None)
+        if text:
+            return text.strip()
+
         try:
-            location = location or getattr(self.config, 'DEFAULT_LOCATION', 'New York')
-            api_key = getattr(self.config, 'OPENWEATHER_API_KEY', '')
-
-            if not api_key or api_key == 'your_api_key_here':
-                return {"error": "OpenWeather API key not configured"}
-
-            url = "https://api.openweathermap.org/data/2.5/weather"
-            params = {
-                "q": location,
-                "appid": api_key,
-                "units": units
-            }
-
-            response = self.session.get(url, params=params, timeout=5)
-            response.raise_for_status()
-            return response.json()
-
-        except Exception as e:
-            print(f"Weather API error: {e}")
-            return None
-
-    def fetch_news(self, query: str = None, country: str = None) -> Optional[Dict]:
-        try:
-            api_key = getattr(self.config, 'NEWS_API_KEY', '')
-
-            if not api_key or api_key == 'your_api_key_here':
-                return {"error": "NewsAPI key not configured"}
-
-            url = "https://newsapi.org/v2/top-headlines"
-            params = {
-                "apiKey": api_key,
-                "pageSize": 5
-            }
-
-            if query:
-                params["q"] = query
-
-            if country:
-                params["country"] = country
-            else:
-                params["country"] = getattr(self.config, 'DEFAULT_COUNTRY_CODE', 'us')
-
-            response = self.session.get(url, params=params, timeout=5)
-            response.raise_for_status()
-            return response.json()
-
-        except Exception as e:
-            print(f"News API error: {e}")
-            return None
-
-    def search_wikipedia(self, query: str, auto_suggest: bool = True) -> Optional[Dict]:
-        try:
-            import wikipedia
-
-            result = wikipedia.summary(query, auto_suggest=auto_suggest, sentences=3)
-            return {
-                "title": query,
-                "summary": result,
-                "source": "wikipedia"
-            }
-
-        except Exception as e:
-            print(f"Wikipedia search error: {e}")
-            return None
-
-    def fetch_data(self, url: str, params: Dict = None, headers: Dict = None) -> Optional[Dict]:
-        try:
-            response = self.session.get(url, params=params, headers=headers, timeout=10)
-            response.raise_for_status()
-            return response.json()
-
-        except Exception as e:
-            print(f"API fetch error: {e}")
-            return None
-
-    def post_data(self, url: str, data: Dict = None, headers: Dict = None) -> Optional[Dict]:
-        try:
-            response = self.session.post(url, json=data, headers=headers, timeout=10)
-            response.raise_for_status()
-            return response.json()
-
-        except Exception as e:
-            print(f"API post error: {e}")
-            return None
-
-    def is_online(self) -> bool:
-        try:
-            response = self.session.get('https://www.google.com', timeout=2)
-            return response.status_code == 200
-        except Exception:
-            return False
-
-    def cache_get(self, key: str) -> Optional[Any]:
-        if key in self.cache:
-            data, timestamp = self.cache[key]
-            if datetime.now().timestamp() - timestamp < self.cache_duration:
-                return data
-            else:
-                del self.cache[key]
-        return None
-
-    def cache_set(self, key: str, data: Any):
-        self.cache[key] = (data, datetime.now().timestamp())
-
-    def clear_cache(self):
-        self.cache.clear()
-
-    def close(self):
-        try:
-            self.session.close()
+            candidates = getattr(response, "candidates", None)
+            if candidates:
+                content = getattr(candidates[0], "content", None)
+                if content is not None:
+                    parts = getattr(content, "parts", None)
+                    if parts:
+                        first = getattr(parts[0], "text", None)
+                        if first:
+                            return first.strip()
         except Exception:
             pass
+
+        return ""
+
+    def generate_response(self, user_input: str) -> str:
+        """Generate an AI response for user input."""
+        try:
+            if not user_input:
+                return ""
+
+            if user_input in self.response_cache:
+                if DEBUG_MODE:
+                    print("[DEBUG] Response found in cache")
+                return self.response_cache[user_input]
+
+            if not self.api_key or self.client is None:
+                return "Gemini is not configured. Set GEMINI_API_KEY in your .env file."
+
+            messages = [{"role": "user", "content": user_input}]
+            for msg in self.conversation_history[-10:]:
+                messages.append(msg)
+
+            prompt = self.system_prompt + "\n\nConversation context:\n"
+            for message in messages:
+                if isinstance(message, dict):
+                    prompt += f"{message.get('role', 'user')}: {message.get('content', '')}\n"
+            prompt += f"\nUser: {user_input}"
+
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+            )
+            ai_response = self._extract_text(response)
+
+            if not ai_response:
+                return "Gemini returned an empty response."
+
+            self.conversation_history.append({"role": "user", "content": user_input})
+            self.conversation_history.append({"role": "assistant", "content": ai_response})
+            if len(self.conversation_history) > 100:
+                self.conversation_history = self.conversation_history[-100:]
+
+            self.response_cache[user_input] = ai_response
+            if DEBUG_MODE:
+                print(f"[DEBUG] Generated response length: {len(ai_response)}")
+            return ai_response
+
+        except Exception as e:
+            error_msg = f"Error generating response: {str(e)}"
+            print(f"❌ {error_msg}")
+            return error_msg
+
+    def get_mood(self) -> str:
+        mood_map = {
+            0: "Analytical",
+            1: "Helpful",
+            2: "Engaged",
+            3: "Attentive",
+            4: "Curious",
+        }
+        mood_index = len(self.conversation_history) % 5
+        return mood_map.get(mood_index, "Neutral")
+
+    def clear_history(self):
+        self.conversation_history = []
+        self.response_cache = {}
+        if DEBUG_MODE:
+            print("[DEBUG] Conversation history cleared")
+
+    def get_context(self) -> Dict:
+        return {
+            "personality": self.personality,
+            "conversation_length": len(self.conversation_history),
+            "mood": self.get_mood(),
+            "cache_size": len(self.response_cache),
+        }

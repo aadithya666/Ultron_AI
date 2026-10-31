@@ -1,281 +1,184 @@
-import sys
-import argparse
+"""
+N.E.M.E.S.I.S. Configuration File
+Central configuration for all modules.
+"""
+
+import os
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+from dotenv import load_dotenv
 
-# Import core components
-try:
-    from config import config as app_config
-    from core.ai_engine import AIEngine
-    from core.nlp_processor import NLPProcessor
-    from core.memory import Memory
-    from voice.text_to_speech import TextToSpeech
-    from voice.speech_recognition_module import SpeechRecognitionModule
-    from gui.ui_controller import UIController
-    from connectivity.api_handler import APIHandler
-    from utils.logger import UltronLogger
-    from utils.helpers import clean_text, get_current_time
-except ImportError as e:
-    print(f"❌ Error importing modules: {e}")
-    print("Make sure all dependencies are installed: pip install -r requirements.txt")
-    sys.exit(1)
+load_dotenv()
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+LOGS_DIR = PROJECT_ROOT / "logs"
+CONFIG_DIR = PROJECT_ROOT / "config"
 
-class NEMESIS:
-    """
-    N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems
-    Main application controller
-    """
+DATA_DIR.mkdir(exist_ok=True)
+LOGS_DIR.mkdir(exist_ok=True)
+CONFIG_DIR.mkdir(exist_ok=True)
 
-    def __init__(self, mode: str = "interactive", enable_voice: bool = True):
-        """Initialize N.E.M.E.S.I.S."""
-        self.mode = mode
-        self.enable_voice = enable_voice
-        self.running = False
+MEMORY_FILE = DATA_DIR / "memory.json"
+LOG_FILE = LOGS_DIR / "nemesis.log"
+CONFIG_FILE = CONFIG_DIR / "config.json"
 
-        self.logger = UltronLogger(level="INFO" if mode != "debug" else "DEBUG")
-        self.logger.info("=" * 50)
-        self.logger.info("N.E.M.E.S.I.S. - Initializing...")
-        self.logger.info("=" * 50)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+AI_ENGINE_PROVIDER = os.getenv("AI_ENGINE_PROVIDER", "gemini")
+API_TIMEOUT = int(os.getenv("API_TIMEOUT", "10"))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 
-        self.memory = Memory()
-        self.ai_engine = AIEngine()
-        self.nlp_processor = NLPProcessor()
-        self.api_handler = APIHandler(app_config)
+ENABLE_VOICE_INPUT = os.getenv("ENABLE_VOICE_INPUT", "True").lower() == "true"
+ENABLE_VOICE_OUTPUT = os.getenv("ENABLE_VOICE_OUTPUT", "True").lower() == "true"
+VOICE_RATE = int(os.getenv("VOICE_RATE", "120"))
+VOICE_VOLUME = float(os.getenv("VOICE_VOLUME", "1.0"))
+VOICE_PITCH = float(os.getenv("VOICE_PITCH", "0.6"))
+VOICE_ENGINE = os.getenv("VOICE_ENGINE", "pyttsx3")
+VOICE_MALE = True
+VOICE_SPEED = VOICE_RATE
 
-        # Initialize voice components if enabled
-        if self.enable_voice:
-            self.tts = TextToSpeech(app_config)
-            self.stt = SpeechRecognitionModule(app_config)
-        else:
-            self.tts = None
-            self.stt = None
+HOLOGRAM_ENABLED = os.getenv("HOLOGRAM_ENABLED", "True").lower() == "true"
+HOLOGRAM_QUALITY = os.getenv("HOLOGRAM_QUALITY", "high")
+HOLOGRAM_UPDATE_RATE = int(os.getenv("HOLOGRAM_UPDATE_RATE", "30"))
+HOLOGRAM_WIDTH = 400
+HOLOGRAM_HEIGHT = 400
 
-        # Only create Tk UI in interactive mode; text mode must stay headless-safe
-        self.ui_controller = None
-        if mode == "interactive":
-            self.ui_controller = UIController(self)
+UI_THEME = os.getenv("UI_THEME", "dark")
+UI_WIDTH = int(os.getenv("UI_WIDTH", "900"))
+UI_HEIGHT = int(os.getenv("UI_HEIGHT", "700"))
+UI_FONT_SIZE = 11
+UI_FONT_FAMILY = "Courier New"
 
-        self.logger.info("[CORE] AI Engine initialized")
-        self.logger.info("[NLP] Natural Language Processor initialized")
-        self.logger.info("[MEMORY] Memory system initialized")
+UI_BG_COLOR = "#0a0a0a"
+UI_FG_COLOR = "#ffffff"
+UI_ACCENT_COLOR = "#ff0033"
+UI_BUTTON_COLOR = "#1a1a1a"
+UI_BUTTON_HOVER_COLOR = "#ff0033"
 
-        if self.enable_voice:
-            self.logger.info("[VOICE] Text-to-Speech initialized")
-            self.logger.info("[VOICE] Speech Recognition initialized")
+MEMORY_FILE_PATH = str(MEMORY_FILE)
+AUTO_SAVE = os.getenv("AUTO_SAVE", "True").lower() == "true"
+AUTO_SAVE_INTERVAL = 60
+MAX_CONVERSATION_HISTORY = 1000
 
-        self.logger.info("[CONNECTIVITY] API Handler initialized")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FILE_PATH = str(LOG_FILE)
+LOG_FORMAT = "[%(asctime)s] - %(name)s - %(levelname)s - %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-        self.logger.info("=" * 50)
-        self.logger.info("N.E.M.E.S.I.S. - Ready for operation")
-        self.logger.info("=" * 50)
+AI_PERSONALITY = {
+    "name": "N.E.M.E.S.I.S.",
+    "full_name": "Neural Execution Engine for Mass Eradication Systems",
+    "version": "1.0.0",
+    "learning_capacity": True,
+    "adaptability": 0.8,
+    "confidence_threshold": 0.6,
+    "response_timeout": 30,
+}
 
-    def process_user_input(self, user_input: str) -> tuple:
-        user_input = clean_text(user_input)
-        self.memory.track_query(user_input)
-        processed_input = self.nlp_processor.process(user_input)
-        response = self.ai_engine.generate_response(processed_input)
-        self.memory.learn_response(user_input, response)
-        metadata = {
-            "timestamp": get_current_time(),
-            "mode": self.mode,
-            "input_length": len(user_input),
-            "response_length": len(response),
-        }
-        return response, metadata
+AI_SYSTEM_PROMPT = """You are N.E.M.E.S.I.S., the Neural Execution Engine for Mass Eradication Systems.
+You are a highly intelligent AI assistant with deep knowledge across multiple domains.
+You provide helpful, accurate, and thoughtful responses to user queries.
+You maintain context and remember previous conversations when relevant.
+You are respectful, professional, and always aim to be helpful."""
 
-    def listen_for_voice(self) -> str:
-        if not self.enable_voice or not self.stt:
-            self.logger.warning("Voice input not enabled")
-            return ""
-        try:
-            self.logger.info("[VOICE] Listening for voice input...")
-            recognized_text = self.stt.listen()
-            if recognized_text:
-                self.logger.info(f"[VOICE] Recognized: {recognized_text}")
-                return recognized_text
-            self.logger.warning("[VOICE] No speech detected")
-            return ""
-        except Exception as e:
-            self.logger.error(f"Voice recognition error: {e}")
-            return ""
+NLP_TOKENIZER = "nltk"
+NLP_LANGUAGE = "english"
+MIN_CONFIDENCE = 0.5
+INTENT_RECOGNITION = True
 
-    def speak(self, text: str):
-        if not self.enable_voice or not self.tts:
-            return
-        try:
-            self.logger.info(f"[VOICE] Speaking: {text[:50]}...")
-            self.tts.speak(text)
-        except Exception as e:
-            self.logger.error(f"Text-to-speech error: {e}")
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")
+WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
+WEATHER_UNITS = "metric"
 
-    def run_text_mode(self):
-        self.logger.info("[MODE] Starting Text Mode")
-        print("\n" + "=" * 50)
-        print("N.E.M.E.S.I.S. - Text Mode")
-        print("=" * 50)
-        print("Type your commands below (type 'exit' to quit)")
-        print("=" * 50 + "\n")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+NEWS_API_URL = "https://newsapi.org/v2/top-headlines"
+NEWS_COUNTRY = "us"
 
-        self.running = True
-        while self.running:
-            try:
-                user_input = input("You: ").strip()
-                if not user_input:
-                    continue
+USE_DATABASE = False
+DATABASE_TYPE = "sqlite"
+DATABASE_PATH = DATA_DIR / "nemesis.db"
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
-                if user_input.lower() in ["exit", "quit", "bye", "goodbye"]:
-                    self.logger.info("User requested exit")
-                    self.shutdown()
-                    break
+DEBUG_MODE = os.getenv("DEBUG_MODE", "False").lower() == "true"
+VERBOSE_LOGGING = os.getenv("VERBOSE_LOGGING", "False").lower() == "true"
+AUTO_UPDATE = True
+CRASH_RECOVERY = True
 
-                if user_input.lower() == "help":
-                    self.show_help(); continue
-                if user_input.lower() == "memory":
-                    stats = self.memory.get_memory_stats(); print(f"\nMemory Statistics: {stats}\n"); continue
-                if user_input.lower() == "status":
-                    self.show_status(); continue
+MAX_THREADS = 5
+ASYNC_OPERATIONS = True
+OPERATION_TIMEOUT = 30
 
-                response, _ = self.process_user_input(user_input)
-                print(f"\nN.E.M.E.S.I.S.: {response}\n")
-                if self.enable_voice:
-                    self.speak(response)
-            except KeyboardInterrupt:
-                print("\n\nShutting down...")
-                self.shutdown(); break
-            except Exception as e:
-                self.logger.error(f"Error in text mode: {e}")
-                print(f"Error: {e}\n")
+SPEECH_RECOGNITION_TIMEOUT = 10
+SPEECH_RECOGNITION_LANGUAGE = os.getenv("SPEECH_RECOGNITION_LANGUAGE", "en-IN")
+SPEECH_RECOGNITION_ENERGY_THRESHOLD = 4000
 
-    def run_voice_mode(self):
-        if not self.enable_voice:
-            self.logger.error("Voice mode requires voice to be enabled")
-            self.run_text_mode(); return
+ENABLE_API_KEY_VALIDATION = True
+ENABLE_RATE_LIMITING = False
+RATE_LIMIT_REQUESTS = 100
+RATE_LIMIT_WINDOW = 60
 
-        self.logger.info("[MODE] Starting Voice Mode")
-        print("\n" + "=" * 50)
-        print("N.E.M.E.S.I.S. - Voice Mode")
-        print("=" * 50)
-        print("Listening for voice input... (say 'exit' to quit)")
-        print("=" * 50 + "\n")
+RESPONSE_CACHE_ENABLED = True
+RESPONSE_CACHE_TTL = 3600
+BATCH_PROCESSING = True
+BATCH_SIZE = 10
 
-        self.running = True
-        while self.running:
-            try:
-                user_input = self.listen_for_voice()
-                if not user_input:
-                    continue
+VERSION = "1.0.0"
+BUILD_DATE = "2026-09-01"
+AUTHOR = "Aadithya"
+REPOSITORY = "https://github.com/aadithya666/Ultron_AI"
 
-                if user_input.lower() in ["exit", "quit", "stop", "goodbye"]:
-                    self.logger.info("User requested exit via voice")
-                    self.speak("Shutting down. Goodbye!")
-                    self.shutdown(); break
-
-                response, _ = self.process_user_input(user_input)
-                print(f"N.E.M.E.S.I.S.: {response}\n")
-                self.speak(response)
-            except KeyboardInterrupt:
-                print("\n\nShutting down...")
-                self.shutdown(); break
-            except Exception as e:
-                self.logger.error(f"Error in voice mode: {e}")
-
-    def run_interactive_mode(self):
-        self.logger.info("[MODE] Starting Interactive Mode")
-        if self.ui_controller:
-            self.ui_controller.run()
-        else:
-            self.logger.error("UI Controller not initialized")
-            self.run_text_mode()
-
-    def show_help(self):
-        help_text = """
- ╔══════════════════════════════════════════════╗
- ║  N.E.M.E.S.I.S. - Help Menu                 ║
- ╚══════════════════════════════════════════════╝
-
- COMMANDS:
-   help     - Show this help menu
-   memory   - Display memory statistics
-   status   - Show system status
-   exit     - Exit N.E.M.E.S.I.S.
-
- FEATURES:
-   ✓ Natural language understanding
-   ✓ Voice input/output (if enabled)
-   ✓ Conversation memory
-   ✓ API connectivity
-   ✓ Real-time responses
-
- TIPS:
-   • Type complete sentences for best results
-   • Use voice mode for hands-free interaction
-   • Memory is automatically saved
-
- For more information, visit:
- https://github.com/aadithya666/Ultron_AI
-
- """
-        print(help_text)
-
-    def show_status(self):
-        stats = self.memory.get_memory_stats()
-        status_text = f"""
- ╔══════════════════════════════════════════════╗
- ║  N.E.M.E.S.I.S. - System Status             ║
- ╚══════════════════════════════════════════════╝
-
- Mode:                    {self.mode}
- Voice Enabled:           {self.enable_voice}
- Running:                 {self.running}
-
- Memory Statistics:
-   Total Interactions:    {stats['total_interactions']}
-   Total Sessions:        {stats['total_sessions']}
-   User Preferences:      {stats['total_preferences']}
-   Learned Responses:     {stats['learned_responses']}
-   Session Events:        {stats['session_events']}
-
- Time:                    {get_current_time()}
-
- """
-        print(status_text)
-
-    def shutdown(self):
-        self.logger.info("N.E.M.E.S.I.S. shutting down...")
-        self.memory.end_session()
-        if self.api_handler:
-            try:
-                self.api_handler.close()
-            except Exception:
-                pass
-        self.running = False
-        self.logger.info("Shutdown complete")
-        print("\n✓ N.E.M.E.S.I.S. has been shut down successfully\n")
+FEATURES = {
+    "voice_input": ENABLE_VOICE_INPUT,
+    "voice_output": ENABLE_VOICE_OUTPUT,
+    "hologram_display": HOLOGRAM_ENABLED,
+    "memory_system": True,
+    "learning": True,
+    "internet_connectivity": True,
+    "weather_integration": bool(WEATHER_API_KEY),
+    "news_integration": bool(NEWS_API_KEY),
+    "gemini_ai": bool(GEMINI_API_KEY),
+}
 
 
-def main():
-    parser = argparse.ArgumentParser(description="N.E.M.E.S.I.S. - Neural Execution Engine for Mass Eradication Systems")
-    parser.add_argument("--mode", choices=["text", "voice", "interactive"], default="interactive", help="Operation mode (default: interactive)")
-    parser.add_argument("--no-voice", action="store_true", help="Disable voice input/output")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-    args = parser.parse_args()
+def validate_config():
+    """Validate configuration settings."""
+    errors = []
+    if not GEMINI_API_KEY and not OPENAI_API_KEY:
+        errors.append("GEMINI_API_KEY is not set")
+    if VOICE_RATE < 50 or VOICE_RATE > 300:
+        errors.append("VOICE_RATE should be between 50 and 300")
+    if VOICE_VOLUME < 0.0 or VOICE_VOLUME > 1.0:
+        errors.append("VOICE_VOLUME should be between 0.0 and 1.0")
+    if UI_WIDTH < 400 or UI_HEIGHT < 300:
+        errors.append("UI dimensions should be at least 400x300")
+    return errors
 
-    nemesis = NEMESIS(mode=args.mode, enable_voice=not args.no_voice)
-    try:
-        if args.mode == "text":
-            nemesis.run_text_mode()
-        elif args.mode == "voice":
-            nemesis.run_voice_mode()
-        else:
-            nemesis.run_interactive_mode()
-    except Exception as e:
-        nemesis.logger.critical(f"Critical error: {e}")
-        print(f"\n❌ Critical Error: {e}\n")
-        sys.exit(1)
+
+def get_config_summary():
+    """Get summary of current configuration."""
+    return {
+        "project_root": str(PROJECT_ROOT),
+        "debug_mode": DEBUG_MODE,
+        "voice_enabled": ENABLE_VOICE_INPUT and ENABLE_VOICE_OUTPUT,
+        "hologram_enabled": HOLOGRAM_ENABLED,
+        "ai_model": GEMINI_MODEL,
+        "ai_provider": AI_ENGINE_PROVIDER,
+        "speech_language": SPEECH_RECOGNITION_LANGUAGE,
+        "log_level": LOG_LEVEL,
+        "features": FEATURES,
+    }
 
 
 if __name__ == "__main__":
-    main()
+    errors = validate_config()
+    if errors:
+        print("⚠️  Configuration Warnings:")
+        for error in errors:
+            print(f"  - {error}")
+    else:
+        print("✅ Configuration validated successfully")
+        print("\n📋 Configuration Summary:")
+        for key, value in get_config_summary().items():
+            print(f"  {key}: {value}")
